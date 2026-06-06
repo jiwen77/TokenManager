@@ -935,7 +935,7 @@
         </div>
         <div class="panel-body">
             <div class="import-config" aria-label="sub2api 导入配置">
-              <div class="import-config-grid">
+              <div class="import-config-grid" id="sub2api-browser-config">
                 <div class="config-field">
                   <label for="sub2api-url">sub2api 服务器地址</label>
                   <input id="sub2api-url" type="text" placeholder="https://api.example.com 或 ip:端口" spellcheck="false" />
@@ -982,7 +982,7 @@
                 </div>
               </div>
 
-              <div class="config-hint" style="margin-top: 10px;">只需填写 sub2api 的服务器地址（域名或 ip:端口）；完整导入路径由服务器 .env 自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。</div>
+              <div class="config-hint" id="sub2api-config-hint" style="margin-top: 10px;">只需填写 sub2api 的服务器地址（域名或 ip:端口）；完整导入路径由服务器 .env 自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。</div>
             </div>
             <section class="server-accounts-card" aria-labelledby="server-accounts-title">
               <div class="server-accounts-head">
@@ -1045,7 +1045,8 @@
           serverAccounts: [],
           serverAccountTotal: 0,
           selectedGroups: [],
-          selectedProxy: null
+          selectedProxy: null,
+          sub2apiProxyEnabled: false
         };
 
         const elements = {
@@ -1068,6 +1069,8 @@
           refreshServerAccounts: document.querySelector("#refresh-server-accounts"),
           serverAccountBody: document.querySelector("#server-account-body"),
           serverAccountStatus: document.querySelector("#server-account-status"),
+          sub2apiBrowserConfig: document.querySelector("#sub2api-browser-config"),
+          sub2apiConfigHint: document.querySelector("#sub2api-config-hint"),
           sub2apiToken: document.querySelector("#sub2api-token"),
           sub2apiTokenToggle: document.querySelector("#toggle-sub2api-token"),
           sub2apiTools: document.querySelector("#sub2api-tools"),
@@ -2091,11 +2094,17 @@
         }
 
         function getSub2ApiAdminBase() {
+          if (state.sub2apiProxyEnabled) {
+            return "/token-manager-api";
+          }
           const { origin, adminBasePath } = getSub2ApiUrlParts();
           return origin ? joinUrlPath(origin, adminBasePath) : adminBasePath;
         }
 
         function getSub2ApiEndpoint() {
+          if (state.sub2apiProxyEnabled) {
+            return "/token-manager-api/admin/accounts/data";
+          }
           const { origin, importPath } = getSub2ApiUrlParts();
           return origin ? joinUrlPath(origin, importPath) : importPath;
         }
@@ -2109,7 +2118,20 @@
           return protocol === "http:" || protocol === "https:";
         }
 
+        function updateSub2ApiConnectionMode() {
+          if (state.sub2apiProxyEnabled) {
+            elements.sub2apiBrowserConfig.hidden = true;
+            elements.sub2apiConfigHint.textContent = "服务器代理模式已启用：浏览器不会接触 sub2api 地址或 Bearer Token；Hostdzire-LA 上的 TokenManager BFF 会使用服务器环境变量访问本机 sub2api。";
+          } else {
+            elements.sub2apiBrowserConfig.hidden = false;
+            elements.sub2apiConfigHint.textContent = "只需填写 sub2api 的服务器地址（域名或 ip:端口）；完整导入路径由服务器 .env 自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。";
+          }
+        }
+
         function hydrateSub2ApiBrowserConfig(payload) {
+          state.sub2apiProxyEnabled = payload.sub2api_proxy_enabled === true || payload.sub2apiProxyEnabled === true;
+          updateSub2ApiConnectionMode();
+
           const configuredImportPath = normalizePublicPath(
             firstNonEmpty(payload.sub2api_import_path, payload.sub2apiImportPath),
             DEFAULT_SUB2API_IMPORT_PATH,
@@ -2209,14 +2231,14 @@
 
         async function requestSub2ApiJson(url, options = {}) {
           const bearerToken = getSub2ApiBearerToken();
-          if (!bearerToken) {
+          if (!state.sub2apiProxyEnabled && !bearerToken) {
             throw new Error("请填写 sub2api Bearer Token。");
           }
 
           const response = await fetch(url, {
             ...options,
             headers: {
-              Authorization: `Bearer ${bearerToken}`,
+              ...(state.sub2apiProxyEnabled ? {} : { Authorization: `Bearer ${bearerToken}` }),
               "Content-Type": "application/json",
               ...(options.headers || {}),
             },
@@ -2323,8 +2345,8 @@
         // 新增功能：异步拉取 sub2api 的分组和代理列表元数据并渲染选择器
         async function fetchSub2ApiMeta() {
           const bearerToken = getSub2ApiBearerToken();
-          if (!bearerToken) {
-            setStatus(elements.outputStatus, "请先填写 sub2api URL 和 Bearer Token 以获取配置数据。", "error");
+          if (!state.sub2apiProxyEnabled && !bearerToken) {
+            setStatus(elements.outputStatus, "请先填写 sub2api 服务器地址和 Bearer Token 以获取配置数据。", "error");
             return;
           }
 
@@ -2382,10 +2404,10 @@
           const sub2apiUrl = getSub2ApiEndpoint();
           const bearerToken = getSub2ApiBearerToken();
           if (!sub2apiUrl) {
-            setStatus(elements.outputStatus, "请填写 sub2api URL。", "error");
+            setStatus(elements.outputStatus, "请填写 sub2api 服务器地址。", "error");
             return;
           }
-          if (!bearerToken) {
+          if (!state.sub2apiProxyEnabled && !bearerToken) {
             setStatus(elements.outputStatus, "请填写 sub2api Bearer Token。", "error");
             return;
           }
@@ -2550,6 +2572,7 @@
 
         updateOutput();
         renderServerAccounts();
+        updateSub2ApiConnectionMode();
         hydrateSub2ApiDefaults();
       })();
     </script>

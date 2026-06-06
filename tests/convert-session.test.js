@@ -585,6 +585,68 @@ async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
   );
 }
 
+async function testServerProxyModeImportsWithoutBrowserBearer() {
+  const capturedRequests = [];
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://api.wenlab.link",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url, options = {}) => {
+      if (url === "/token-manager-auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sub2api_proxy_enabled: true,
+            sub2api_default_origin: "https://api.wenlab.link",
+            sub2api_import_path: "/api/v1/admin/accounts/data",
+          }),
+        };
+      }
+
+      capturedRequests.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(String(url).includes("/admin/accounts?")
+          ? { data: { items: [], total: 0 } }
+          : { data: { account_created: 1, account_failed: 0, proxy_created: 0, proxy_reused: 0 } }),
+      };
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(elements.get("#sub2api-browser-config").hidden, true);
+  assert.match(elements.get("#sub2api-config-hint").textContent, /服务器代理模式已启用/);
+
+  const input = elements.get("#session-input");
+  const importButton = elements.get("#import-sub2api");
+  input.value = JSON.stringify({
+    user: { email: "mark@example.com" },
+    accessToken: jwtWithPayload({
+      exp: 1780473960,
+      "https://api.openai.com/auth": { chatgpt_account_id: "chatgpt-account-1" },
+    }),
+  });
+  dispatch(input, "input");
+  dispatch(importButton, "click");
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const post = capturedRequests.find((request) => request.options?.method === "POST");
+  assert.equal(post.url, "/token-manager-api/admin/accounts/data");
+  assert.equal(post.options.headers.Authorization, undefined);
+  assert.ok(
+    capturedRequests.some((request) => request.url.startsWith("/token-manager-api/admin/accounts?")),
+    "server proxy mode should refresh server accounts through BFF",
+  );
+}
+
 async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
   const capturedRequests = [];
   const { elements } = loadPageScript({
@@ -781,6 +843,7 @@ async function main() {
   testSub2apiImportToolsOnlyVisibleForSub2apiFormat();
   await testServerDefaultSub2apiUrlHydratesInput();
   await testSub2apiUrlShorthandNormalizesToApiEndpoints();
+  await testServerProxyModeImportsWithoutBrowserBearer();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
   await testRefreshServerAccountsFetchesPersistedAccounts();
   await testUrlTokenDoesNotHydrateBearerOrFetchAccounts();

@@ -4,34 +4,40 @@
 
 优先使用 `SUB2API_ADMIN_EMAIL` + `SUB2API_ADMIN_PASSWORD` 自动登录并缓存/刷新 sub2api JWT；如果 sub2api 后台登录额外启用了 2FA/Turnstile，推荐使用 sub2api 的 `admin_api_key` 并通过 `SUB2API_ADMIN_API_KEY` 注入 `x-api-key`。也可用 `SUB2API_JWT_SECRET` + 管理员用户 ID/token_version 在服务器侧短期签发 JWT，或用 `SUB2API_ADMIN_BEARER_TOKEN` 作为静态令牌兜底。以上密钥都只保存在服务器，仍不会暴露给浏览器。
 
-## 页面内密码门禁（auth-only）
+## 推荐：页面门禁 + 服务端代理模式
 
-如果只想实现“访问 TokenManager 页面前先在页面内输入密码”，使用 auth-only 模式即可；sub2api URL 和 Bearer Token 仍由用户进入页面后手动填写：
+Hostdzire-LA 当前应使用服务端代理模式：浏览器只访问 TokenManager，同源请求 `/token-manager-api/*`；BFF 在服务器上访问本机 sub2api。
 
 ```bash
-TOKENMANAGER_AUTH_ONLY=true
+TOKENMANAGER_AUTH_ONLY=false
 TOKENMANAGER_SESSION_SECRET=<至少32字节随机字符串>
 TOKENMANAGER_PASSWORD_HASH=<node server/tokenmanager-bff.js hash-password 生成>
 TOKENMANAGER_HOST=127.0.0.1
 TOKENMANAGER_PORT=8787
-# 页面内 sub2api 服务器地址输入框的默认值，只放域名或 ip:端口。
+
+# BFF 在 Hostdzire-LA 上访问 sub2api，本机地址只给服务器进程用。
+SUB2API_BASE_URL=http://127.0.0.1:8080/api/v1
+SUB2API_ADMIN_EMAIL=<sub2api 管理员邮箱>
+SUB2API_ADMIN_PASSWORD=<sub2api 管理员密码>
+# 或改用 SUB2API_ADMIN_API_KEY / SUB2API_JWT_SECRET / SUB2API_ADMIN_BEARER_TOKEN。
+
+# 页面如果退回浏览器直连模式时才会用到下面两个非敏感默认值。
 TOKENMANAGER_SUB2API_DEFAULT_ORIGIN=https://api.wenlab.link
-# 完整导入接口路径；用户不需要在网页里填写这段。
 TOKENMANAGER_SUB2API_IMPORT_PATH=/api/v1/admin/accounts/data
 ```
 
-Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-manager-auth/check }`。未登录时 BFF 会返回一个 HTML 密码表单；登录成功后写入 HttpOnly Cookie，再放行静态页面。
+Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-manager-auth/check }`。未登录时 BFF 会返回一个 HTML 密码表单；登录成功后写入 HttpOnly Cookie，再放行静态页面。Caddy 还要把 `/token-manager-api/*` 反代到 BFF，不能返回 404。
 
 登录信息与页面默认值建议这样保存：
 
 - `.env`/systemd `EnvironmentFile` 保存 `TOKENMANAGER_PASSWORD_HASH` 和 `TOKENMANAGER_SESSION_SECRET`。
 - 不要把 TokenManager 明文登录密码写入 `.env`，更不要提交到 git；服务校验只需要哈希。
 - 如需临时留存明文密码用于找回，应放在服务器 root-only 文件或密码管理器中，权限建议 `600`；确认已记录后可以删除该明文文件。
-- `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` 只控制网页里 sub2api 服务器地址输入框的默认值，不包含 Bearer Token，也不会把任何 token 暴露给浏览器。
-- `TOKENMANAGER_SUB2API_IMPORT_PATH` 控制自动补齐的完整导入接口路径；BFF 会从它自动推导 `/api/v1` 去刷新账号、分组和代理元数据。
-- `SUB2API_BASE_URL` 是 BFF 服务端代理上游地址，给 Node 在服务器上访问用；网页输入框默认值请用 `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN`，不要直接拿服务器内网 `127.0.0.1` 当浏览器默认地址。
+- `SUB2API_BASE_URL` 是 BFF 服务端代理上游地址，给 Node 在服务器上访问用；这里可以用服务器内网 `127.0.0.1`。
+- `SUB2API_ADMIN_*` / `SUB2API_JWT_SECRET` / `SUB2API_ADMIN_BEARER_TOKEN` 只保存在服务器 `.env`，不要提交到 git。
+- `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` / `TOKENMANAGER_SUB2API_IMPORT_PATH` 是浏览器直连模式的非敏感默认值；服务端代理模式下页面会隐藏地址和 Bearer Token 输入。
 
-## 页面 sub2api 默认地址字段
+## 可选：浏览器直连模式默认地址字段
 
 | 字段 | 作用 | 示例 |
 |---|---|---|
@@ -56,9 +62,9 @@ https://api.wenlab.link/api/v1/admin/accounts/data
 
 如果你的 sub2api 只有 HTTP，没有 HTTPS，建议通过 Caddy 同域反代后使用 HTTPS 服务器地址，避免浏览器 Mixed Content/CORS 问题。
 
-## 可选：服务端代理 sub2api 管理接口
+## 服务端代理 sub2api 管理接口字段
 
-如果想让浏览器永远看不到 sub2api 管理 token，再额外配置下面的 sub2api 变量并开放 `/token-manager-api/*` 到 BFF。
+服务端代理模式会让浏览器永远看不到 sub2api 管理 token，需要配置下面的 sub2api 变量并开放 `/token-manager-api/*` 到 BFF。
 
 ```bash
 TOKENMANAGER_SESSION_SECRET=<至少32字节随机字符串>

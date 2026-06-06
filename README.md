@@ -10,7 +10,9 @@
 
 ```text
 /token-manager/ 未登录时由服务器返回页面内密码表单
-密码正确后进入 TokenManager，再在网页内自定义填写 sub2api URL 和 Bearer Token
+密码正确后进入 TokenManager
+点击导入/刷新时，浏览器请求 TokenManager BFF
+BFF 在 Hostdzire-LA 服务器上访问 http://127.0.0.1:8080/api/v1 的 sub2api
 ```
 
 也就是说：
@@ -18,14 +20,14 @@
 - 没有页面访问密码的人拿不到真正的 TokenManager 工具页面。
 - 登录表单只有密码，不需要用户名，也不会触发浏览器 Basic Auth 弹窗。
 - TokenManager 自身登录配置只应放在服务器运行环境：`.env`/systemd `EnvironmentFile` 保存 `TOKENMANAGER_PASSWORD_HASH` 和 `TOKENMANAGER_SESSION_SECRET`，不要保存或提交明文登录密码。
-- 进入工具页面后，`sub2api 服务器地址`、`Bearer Token`、分组、代理等仍可手动/自定义输入；Bearer Token 输入框默认隐藏，可用眼睛按钮临时显示/隐藏。
-- `sub2api 服务器地址` 输入框只需要填浏览器能访问的域名或 `ip:端口`，例如 `https://api.wenlab.link`；`/api/v1/admin/accounts/data` 由服务器 `.env` 自动补齐。
-- 不要把服务器内网 `http://127.0.0.1:8080` 当网页默认地址；浏览器里的 `127.0.0.1` 指的是访问者自己的电脑。
+- 当前 Hostdzire-LA 部署使用服务端代理模式：网页不会要求填写 sub2api 地址或 Bearer Token。
+- sub2api 管理认证只保存在服务器 `.env`，浏览器不会看到 sub2api 管理 token。
+- BFF 可以使用服务器本机地址 `http://127.0.0.1:8080/api/v1` 访问 sub2api；这是服务器进程访问，不是浏览器访问。
 - 转换预览仍在浏览器本地完成，不写入 localStorage/sessionStorage。
-- 点击导入/刷新时，浏览器会把你在页面里填写的 sub2api 地址和 Bearer Token 用于请求 sub2api。
+- 点击导入/刷新时，浏览器只请求同源 `/token-manager-api/*`；真正的 sub2api 请求由服务器 BFF 完成。
 - 不再支持从 `/token-manager/?token=...` 自动读取 Bearer Token，避免敏感 token 进入浏览器历史、日志或分享链接。
 
-当前页面密码门禁由 `server/tokenmanager-bff.js` 的 auth-only 模式配合 Caddy `forward_auth` 提供；仓库里也保留同一个 BFF 的可选 sub2api 服务端代理模式，说明见 [`server/README.md`](server/README.md)。
+当前页面密码门禁和 sub2api 服务端代理都由 `server/tokenmanager-bff.js` 配合 Caddy 提供，说明见 [`server/README.md`](server/README.md)。
 
 ## 使用提示
 
@@ -78,4 +80,4 @@ ChatGPT Web session 通常不包含 OAuth 文件里常见的 `refresh_token`，�
 docs/index.html
 ```
 
-本地静态打开时可以做浏览器内转换预览。若要导入到 sub2api，请在页面里填写你的 sub2api 服务器地址和 Bearer Token。地址建议写 `https://api.example.com` 或 `https://ip:端口`；完整导入接口路径由部署时的 `.env` 配置补齐。如果页面通过 HTTPS 打开，浏览器可能会拦截 HTTP 明文地址。
+本地静态打开时可以做浏览器内转换预览。若不运行 BFF，导入到 sub2api 仍需要浏览器直连远端 sub2api 并填写 Bearer Token；生产部署推荐运行 BFF 服务端代理模式，让浏览器只请求同源 `/token-manager-api/*`。

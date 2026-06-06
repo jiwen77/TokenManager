@@ -195,6 +195,7 @@ test("authenticated config exposes only non-secret browser defaults", async () =
       headers: { Cookie: cookie },
     });
     assert.equal(config.response.status, 200);
+    assert.equal(config.body.sub2api_proxy_enabled, false);
     assert.equal(config.body.sub2api_default_origin, "https://api.example.com");
     assert.equal(config.body.sub2api_api_base_path, "/custom-api");
     assert.equal(config.body.sub2api_import_path, "/custom-api/admin/accounts/data");
@@ -233,6 +234,31 @@ test("login sets an HttpOnly cookie without returning any bearer token", async (
     await mock.close();
   }
 });
+
+test("config reports proxy mode when auth-only is disabled", async () => {
+  const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());
+  const bff = await startBff({}, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const config = await fetchJson(`${bff.baseUrl}/token-manager-auth/config`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(config.response.status, 200);
+    assert.equal(config.body.sub2api_proxy_enabled, true);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
 
 test("authenticated proxy injects sub2api bearer server-side only", async () => {
   const upstreamRequests = [];

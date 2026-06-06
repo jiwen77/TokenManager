@@ -896,6 +896,7 @@ async function handleAuth(req, res, parsedUrl, context) {
     }
     const defaults = config.sub2apiBrowserDefaults || createSub2ApiBrowserDefaults({});
     jsonResponse(res, 200, {
+      sub2api_proxy_enabled: !config.authOnly,
       sub2api_default_origin: defaults.origin || "",
       sub2api_admin_base_path: defaults.adminBasePath || "/api/v1",
       sub2api_import_path: defaults.importPath || "/api/v1/admin/accounts/data",

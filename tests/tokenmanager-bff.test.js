@@ -236,8 +236,15 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
     });
     assert.equal(app.response.status, 200);
     assert.match(app.body, /id="save-sub2api-config"/);
-    assert.match(app.body, /\/token-manager\/auth\/config/);
-    assert.match(app.body, /\/token-manager\/api/);
+    assert.match(app.body, /src="\.\/app\.js"/);
+
+    const appScript = await fetchText(`${bff.baseUrl}/token-manager/app.js`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(appScript.response.status, 200);
+    assert.match(appScript.response.headers.get("content-type") || "", /text\/javascript/);
+    assert.match(appScript.body, /\/token-manager\/auth\/config/);
+    assert.match(appScript.body, /\/token-manager\/api/);
 
     const icon = await fetchText(`${bff.baseUrl}/token-manager/favicon.svg`, {
       headers: { Cookie: cookie },

@@ -59,9 +59,13 @@ function createFakeElement(selector, options = {}) {
 function loadPageScript(overrides = {}) {
   const htmlPath = path.join(__dirname, "..", "docs", "index.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  const match = html.match(/<script>\s*([\s\S]*?)\s*<\/script>\s*<\/body>/);
+  const scriptMatch = html.match(/<script\s+src=(["'])(.*?)\1><\/script>/);
+  const inlineMatch = html.match(/<script>\s*([\s\S]*?)\s*<\/script>\s*<\/body>/);
+  const script = scriptMatch
+    ? fs.readFileSync(path.join(path.dirname(htmlPath), scriptMatch[2]), "utf8")
+    : inlineMatch?.[1];
 
-  assert.ok(match, "expected docs/index.html to contain one inline script");
+  assert.ok(script, "expected docs/index.html to reference or contain the app script");
 
   const elements = new Map();
   const htmlIdAttributes = new Map(
@@ -145,7 +149,7 @@ function loadPageScript(overrides = {}) {
     ...overrides,
   };
 
-  vm.runInNewContext(match[1], context, { filename: "docs/index.html" });
+  vm.runInNewContext(script, context, { filename: "docs/app.js" });
 
   return { elements, formatButtons };
 }
@@ -171,9 +175,10 @@ function jwtWithPayload(payload) {
 function testReferencedDomIdsExist() {
   const htmlPath = path.join(__dirname, "..", "docs", "index.html");
   const html = fs.readFileSync(htmlPath, "utf8");
+  const appScript = fs.readFileSync(path.join(__dirname, "..", "docs", "app.js"), "utf8");
   const ids = new Set(Array.from(html.matchAll(/\bid=(["'])(.*?)\1/g), (match) => match[2]));
   const referencedIds = new Set(
-    Array.from(html.matchAll(/document\.querySelector\(\s*(["'])#([^"']+)\1\s*\)/g), (match) => match[2])
+    Array.from(appScript.matchAll(/document\.querySelector\(\s*(["'])#([^"']+)\1\s*\)/g), (match) => match[2])
   );
   const missing = Array.from(referencedIds)
     .filter((id) => !ids.has(id))

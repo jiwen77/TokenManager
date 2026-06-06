@@ -1,29 +1,27 @@
 # ChatGPT Session to CPA / sub2api / Cockpit / 9router / Codex / AxonHub / Codex-Manager
 
-私有网页端工具，用来把 ChatGPT Web 登录 session JSON 转换成 CPA、sub2api、Cockpit Tools、9router、Codex auth.json、AxonHub 或 Codex-Manager 可导入 JSON；也可通过 TokenManager BFF 对接私有 sub2api 后端，将账号信息持久化保存在服务器数据库中。
+私有网页端工具，用来把 ChatGPT Web 登录 session JSON 转换成 CPA、sub2api、Cockpit Tools、9router、Codex auth.json、AxonHub 或 Codex-Manager 可导入 JSON；也可把转换结果导入私有 sub2api 后端，让账号数据持久化保存在服务器数据库中。
 
-## 安全部署模式（推荐）
+## 当前私有部署方式
 
 代码仓库：<https://github.com/jiwen77/TokenManager>
 
-推荐部署为：
+当前推荐部署为：
 
 ```text
-浏览器 /token-manager/ 静态页面
-  -> /token-manager-auth/*  同源登录/退出/me
-  -> /token-manager-api/*   同源 BFF 代理
-  -> sub2api /api/v1/admin/*（仅服务器内网访问）
+/token-manager/ 先由 Caddy basic_auth 做访问密码门禁
+进入页面后，再在网页内自定义填写 sub2api URL 和 Bearer Token
 ```
 
-安全边界：
+也就是说：
 
-- 转换预览继续在浏览器本地完成，不写入 localStorage/sessionStorage。
-- 浏览器不再填写、不再保存、不再看到 sub2api Bearer/admin JWT。
-- TokenManager 登录后只持有 `HttpOnly; Secure; SameSite=Lax` 会话 Cookie。
-- sub2api 管理员邮箱、密码、Bearer/JWT 只保存在服务器环境变量和 BFF 内存中。
-- BFF 只白名单代理账号列表、账号导入、分组列表、代理列表四类 sub2api 管理接口。
+- 没有页面访问密码的人不能打开 TokenManager 网页。
+- 页面内的 `sub2api URL`、`Bearer Token`、分组、代理等仍可手动/自定义输入。
+- 转换预览仍在浏览器本地完成，不写入 localStorage/sessionStorage。
+- 点击导入/刷新时，浏览器会把你在页面里填写的 sub2api URL 和 Bearer Token 用于请求 sub2api。
+- 不再支持从 `/token-manager/?token=...` 自动读取 Bearer Token，避免敏感 token 进入浏览器历史、日志或分享链接。
 
-BFF 使用说明见 [`server/README.md`](server/README.md)。
+如果以后想改成“浏览器永远看不到 sub2api 管理 token”，仓库里也保留了可选的 `server/tokenmanager-bff.js` 服务端代理方案，说明见 [`server/README.md`](server/README.md)。
 
 ## 使用提示
 
@@ -76,4 +74,4 @@ ChatGPT Web session 通常不包含 OAuth 文件里常见的 `refresh_token`，�
 docs/index.html
 ```
 
-本地静态打开时只能做浏览器内转换预览。若要读取服务器已保存账号或导入到 sub2api，需要部署 `server/tokenmanager-bff.js`，并通过同源 `/token-manager-auth/*` 与 `/token-manager-api/*` 访问。
+本地静态打开时可以做浏览器内转换预览。若要导入到 sub2api，请在页面里填写你的 sub2api URL 和 Bearer Token。

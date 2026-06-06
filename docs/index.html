@@ -598,43 +598,6 @@
         line-height: 1.45;
       }
 
-      .tokenmanager-login {
-        display: grid;
-        gap: 10px;
-        margin-bottom: 12px;
-        padding: 12px;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        background: linear-gradient(135deg, rgba(36, 80, 90, 0.08), rgba(255, 255, 255, 0.55));
-      }
-
-      .tokenmanager-login-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 10px;
-      }
-
-      .tokenmanager-login-title {
-        margin: 0;
-        font-size: 0.94rem;
-        font-weight: 900;
-      }
-
-      .tokenmanager-login-help {
-        margin: 4px 0 0;
-        color: var(--muted);
-        font-size: 0.82rem;
-        line-height: 1.45;
-      }
-
-      .tokenmanager-login-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto auto;
-        gap: 8px;
-        align-items: end;
-      }
-
       .server-accounts-card {
         margin-bottom: 12px;
         border: 1px solid var(--line);
@@ -727,10 +690,8 @@
           width: 100%;
         }
 
-        .summary,
-        .tokenmanager-login-row,
-        .import-config-grid {
-          grid-template-columns: 1fr !important;
+        .summary {
+          grid-template-columns: 1fr;
         }
 
         .discord-card {
@@ -866,34 +827,15 @@
             <p class="notice" id="cpa-notice">
               ChatGPT Web session 一般没有 `refresh_token`；缺少真实 `id_token` 时 CPA、Cockpit、Codex 和 AxonHub 会构造 Codex 可解析的占位 JWT claims。Codex 和 Codex-Manager 会保留空 `refresh_token`；AxonHub 缺少真实 `refresh_token` 时会写入占位值。
             </p>
-            <form class="tokenmanager-login" id="tokenmanager-login-form" autocomplete="off">
-              <div class="tokenmanager-login-head">
-                <div>
-                  <h3 class="tokenmanager-login-title">服务器安全登录</h3>
-                  <p class="tokenmanager-login-help">登录后浏览器只持有 HttpOnly 会话 Cookie；sub2api 管理员 Bearer/JWT 由服务器代理注入，不会暴露到页面或本地存储。</p>
-                </div>
-                <button class="button button-secondary hidden" id="tokenmanager-logout" type="button">退出</button>
-              </div>
-              <div class="tokenmanager-login-row">
-                <div class="config-field">
-                  <label for="tokenmanager-password">TokenManager 登录密码</label>
-                  <input id="tokenmanager-password" type="password" placeholder="输入服务器登录密码" autocomplete="current-password" spellcheck="false" />
-                </div>
-                <button class="button button-primary" id="tokenmanager-login" type="submit">登录</button>
-                <button class="button button-secondary" id="refresh-auth-state" type="button">检查状态</button>
-              </div>
-              <div class="status-line" id="tokenmanager-auth-status">正在检查服务器登录状态...</div>
-            </form>
-
             <div class="import-config" aria-label="sub2api 导入配置">
               <div class="import-config-grid">
                 <div class="config-field">
-                  <label for="sub2api-url">服务器导入端点</label>
-                  <input id="sub2api-url" type="text" value="/token-manager-api/admin/accounts/data" spellcheck="false" readonly />
+                  <label for="sub2api-url">sub2api URL</label>
+                  <input id="sub2api-url" type="text" value="/api/v1/admin/accounts/data" spellcheck="false" />
                 </div>
                 <div class="config-field">
-                  <label>敏感令牌位置</label>
-                  <div class="config-hint">sub2api 管理员账号和 Bearer/JWT 只保存在服务器 BFF；浏览器不会读取、保存或发送 Bearer Token。</div>
+                  <label for="sub2api-token">Bearer Token</label>
+                  <input id="sub2api-token" type="password" placeholder="请输入 sub2api 的 Bearer 令牌" spellcheck="false" />
                 </div>
               </div>
 
@@ -926,7 +868,7 @@
                 </div>
               </div>
 
-              <div class="config-hint" style="margin-top: 10px;">此端点固定走同源 `/token-manager-api/*` 代理；转换预览仍在浏览器本地完成，点击导入/刷新时才把账号导入数据提交到服务器。</div>
+              <div class="config-hint" style="margin-top: 10px;">如果页面和 sub2api 在同一域名下，URL 保持默认即可；如果是不同端口或独立部署，就把这里改成完整接口地址。</div>
             </div>
             <section class="server-accounts-card" aria-labelledby="server-accounts-title">
               <div class="server-accounts-head">
@@ -936,7 +878,7 @@
                 </div>
                 <button class="button button-secondary" id="refresh-server-accounts" type="button">刷新服务器账号</button>
               </div>
-              <div class="status-line server-accounts-status" id="server-account-status">登录后可刷新服务器账号列表。</div>
+              <div class="status-line server-accounts-status" id="server-account-status">填写 Bearer Token 后可刷新服务器账号列表。</div>
               <div class="accounts server-accounts-table" aria-label="服务器账号列表">
                 <table>
                   <colgroup>
@@ -1029,9 +971,7 @@
           serverAccounts: [],
           serverAccountTotal: 0,
           selectedGroups: [],
-          selectedProxy: null,
-          isAuthenticated: false,
-          authExpiresAt: ""
+          selectedProxy: null
         };
 
         const elements = {
@@ -1054,6 +994,7 @@
           refreshServerAccounts: document.querySelector("#refresh-server-accounts"),
           serverAccountBody: document.querySelector("#server-account-body"),
           serverAccountStatus: document.querySelector("#server-account-status"),
+          sub2apiToken: document.querySelector("#sub2api-token"),
           sub2apiUrl: document.querySelector("#sub2api-url"),
           statCount: document.querySelector("#stat-count"),
           statErrors: document.querySelector("#stat-errors"),
@@ -1064,12 +1005,6 @@
           proxy: document.querySelector("#sub2api-proxy"),
           priority: document.querySelector("#sub2api-priority"),
           rateMultiplier: document.querySelector("#sub2api-rate-multiplier"),
-          tokenManagerAuthStatus: document.querySelector("#tokenmanager-auth-status"),
-          tokenManagerLogin: document.querySelector("#tokenmanager-login"),
-          tokenManagerLoginForm: document.querySelector("#tokenmanager-login-form"),
-          tokenManagerLogout: document.querySelector("#tokenmanager-logout"),
-          tokenManagerPassword: document.querySelector("#tokenmanager-password"),
-          refreshAuthState: document.querySelector("#refresh-auth-state"),
         };
 
         const exampleSession = {
@@ -1088,9 +1023,6 @@
         };
 
         const AXONHUB_PLACEHOLDER_REFRESH_TOKEN = "__missing_refresh_token__";
-        if (!elements.sub2apiUrl.value) {
-          elements.sub2apiUrl.value = "/token-manager-api/admin/accounts/data";
-        }
 
         function isPlainObject(value) {
           return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -1810,106 +1742,6 @@
           element.classList.toggle("is-error", tone === "error");
         }
 
-        function updateImportButtonState() {
-          elements.importSub2api.disabled = !state.converted.length || !state.isAuthenticated;
-        }
-
-        function updateAuthUi() {
-          const isAuthenticated = Boolean(state.isAuthenticated);
-          elements.tokenManagerPassword.disabled = isAuthenticated;
-          elements.tokenManagerLogin.disabled = isAuthenticated;
-          elements.refreshServerAccounts.disabled = !isAuthenticated;
-          elements.fetchSub2apiMeta.disabled = !isAuthenticated;
-          elements.tokenManagerLogout.classList.toggle("hidden", !isAuthenticated);
-          elements.refreshAuthState.classList.toggle("hidden", isAuthenticated);
-
-          if (isAuthenticated) {
-            const expiresText = state.authExpiresAt ? `，会话到期：${formatDisplayDate(state.authExpiresAt)}` : "";
-            setStatus(elements.tokenManagerAuthStatus, `已登录服务器${expiresText}。`, "ok");
-          } else {
-            setStatus(elements.tokenManagerAuthStatus, "未登录服务器；账号列表读取和导入需要先登录。", "error");
-          }
-          updateImportButtonState();
-        }
-
-        function setAuthState(authenticated, expiresAt = "") {
-          state.isAuthenticated = Boolean(authenticated);
-          state.authExpiresAt = expiresAt || "";
-          updateAuthUi();
-        }
-
-        async function refreshAuthState(options = {}) {
-          try {
-            const response = await fetch("/token-manager-auth/me", {
-              method: "GET",
-              credentials: "same-origin",
-              headers: { Accept: "application/json" },
-            });
-            const body = await readJsonResponse(response);
-            if (!response.ok) {
-              throw new Error(getErrorMessageFromResponseBody(body, `HTTP ${response.status}`));
-            }
-            setAuthState(Boolean(body?.authenticated), body?.expires_at || "");
-            if (state.isAuthenticated && options.refreshAccounts) {
-              await refreshServerAccounts();
-            }
-          } catch (error) {
-            setAuthState(false);
-            setStatus(elements.tokenManagerAuthStatus, error instanceof Error ? error.message : "无法检查登录状态。", "error");
-          }
-        }
-
-        async function loginTokenManager(event) {
-          event?.preventDefault?.();
-          const password = String(elements.tokenManagerPassword.value || "");
-          if (!password) {
-            setStatus(elements.tokenManagerAuthStatus, "请输入 TokenManager 登录密码。", "error");
-            return;
-          }
-
-          elements.tokenManagerLogin.disabled = true;
-          setStatus(elements.tokenManagerAuthStatus, "正在登录服务器...", "ok");
-          try {
-            const response = await fetch("/token-manager-auth/login", {
-              method: "POST",
-              credentials: "same-origin",
-              headers: { "Content-Type": "application/json", Accept: "application/json" },
-              body: JSON.stringify({ password }),
-            });
-            const body = await readJsonResponse(response);
-            if (!response.ok) {
-              throw new Error(getErrorMessageFromResponseBody(body, `HTTP ${response.status}`));
-            }
-            elements.tokenManagerPassword.value = "";
-            setAuthState(Boolean(body?.authenticated), body?.expires_at || "");
-            await refreshServerAccounts();
-          } catch (error) {
-            setAuthState(false);
-            setStatus(elements.tokenManagerAuthStatus, error instanceof Error ? error.message : "登录失败。", "error");
-          } finally {
-            updateAuthUi();
-          }
-        }
-
-        async function logoutTokenManager() {
-          setStatus(elements.tokenManagerAuthStatus, "正在退出...", "ok");
-          try {
-            await fetch("/token-manager-auth/logout", {
-              method: "POST",
-              credentials: "same-origin",
-              headers: { "Content-Type": "application/json", Accept: "application/json" },
-              body: "{}",
-            });
-          } catch {
-            // 即使服务器不可达，也清理当前页面状态。
-          }
-          state.serverAccounts = [];
-          state.serverAccountTotal = 0;
-          renderServerAccounts();
-          setAuthState(false);
-          setStatus(elements.serverAccountStatus, "已退出；登录后可读取服务器账号。", "");
-        }
-
         function updateOutput() {
           const hasConverted = state.converted.length > 0;
           let outputText = "";
@@ -1927,7 +1759,7 @@
           elements.statFormat.textContent = OUTPUT_LABELS[state.format];
           elements.outputSubtitle.textContent = `当前输出为 ${OUTPUT_LABELS[state.format]} 导入 JSON。`;
           elements.cpaNotice.style.display = ["cpa", "cockpit", "codex", "axonhub", "codexmanager"].includes(state.format) ? "block" : "none";
-          updateImportButtonState();
+          elements.importSub2api.disabled = !hasConverted;
 
           renderAccounts();
           renderIssues();
@@ -2035,7 +1867,11 @@
 
         function getSub2ApiEndpoint() {
           const raw = String(elements.sub2apiUrl?.value || "").trim();
-          return raw || "/token-manager-api/admin/accounts/data";
+          return raw || "/api/v1/admin/accounts/data";
+        }
+
+        function getSub2ApiBearerToken() {
+          return String(elements.sub2apiToken?.value || "").trim();
         }
 
         function getSub2ApiAdminBase() {
@@ -2044,23 +1880,15 @@
             .replace(/\/+$/, "");
 
           if (endpoint.endsWith("/admin/accounts/data")) {
-            return endpoint.slice(0, -"/admin/accounts/data".length) || "/token-manager-api";
+            return endpoint.slice(0, -"/admin/accounts/data".length) || "/api/v1";
           }
 
-          return endpoint || "/token-manager-api";
+          return endpoint || "/api/v1";
         }
 
         function getSub2ApiAdminUrl(path) {
           const base = getSub2ApiAdminBase().replace(/\/+$/, "");
           return `${base}${path}`;
-        }
-
-        function assertServerApiUrl(url) {
-          const value = String(url || "").trim();
-          if (!value.startsWith("/token-manager-api/")) {
-            throw new Error("服务器端点必须使用同源 /token-manager-api/ 代理，避免把敏感请求发到浏览器直连地址。");
-          }
-          return value;
         }
 
         function buildUrlWithQuery(url, params) {
@@ -2111,30 +1939,20 @@
         }
 
         async function requestSub2ApiJson(url, options = {}) {
-          if (!state.isAuthenticated) {
-            throw new Error("请先登录 TokenManager 服务器。");
+          const bearerToken = getSub2ApiBearerToken();
+          if (!bearerToken) {
+            throw new Error("请填写 sub2api Bearer Token。");
           }
 
-          const safeUrl = assertServerApiUrl(url);
-          const headers = {
-            Accept: "application/json",
-            ...(options.body ? { "Content-Type": "application/json" } : {}),
-            ...(options.headers || {}),
-          };
-          delete headers.Authorization;
-          delete headers.authorization;
-
-          const response = await fetch(safeUrl, {
+          const response = await fetch(url, {
             ...options,
-            credentials: "same-origin",
-            headers,
+            headers: {
+              Authorization: `Bearer ${bearerToken}`,
+              "Content-Type": "application/json",
+              ...(options.headers || {}),
+            },
           });
           const body = await readJsonResponse(response);
-
-          if (response.status === 401) {
-            setAuthState(false);
-            throw new Error("服务器登录已失效，请重新登录。 ");
-          }
 
           if (!response.ok) {
             throw new Error(getErrorMessageFromResponseBody(body, `HTTP ${response.status}`));
@@ -2207,11 +2025,6 @@
         }
 
         async function refreshServerAccounts() {
-          if (!state.isAuthenticated) {
-            setStatus(elements.serverAccountStatus, "请先登录 TokenManager 服务器。", "error");
-            return;
-          }
-
           elements.refreshServerAccounts.disabled = true;
           const originalText = elements.refreshServerAccounts.textContent;
           elements.refreshServerAccounts.textContent = "刷新中...";
@@ -2233,15 +2046,16 @@
           } catch (error) {
             setStatus(elements.serverAccountStatus, error instanceof Error ? error.message : "读取服务器账号失败。", "error");
           } finally {
-            elements.refreshServerAccounts.disabled = !state.isAuthenticated;
+            elements.refreshServerAccounts.disabled = false;
             elements.refreshServerAccounts.textContent = originalText;
           }
         }
 
         // 新增功能：异步拉取 sub2api 的分组和代理列表元数据并渲染选择器
         async function fetchSub2ApiMeta() {
-          if (!state.isAuthenticated) {
-            setStatus(elements.outputStatus, "请先登录 TokenManager 服务器以获取配置数据。", "error");
+          const bearerToken = getSub2ApiBearerToken();
+          if (!bearerToken) {
+            setStatus(elements.outputStatus, "请先填写 sub2api URL 和 Bearer Token 以获取配置数据。", "error");
             return;
           }
 
@@ -2278,7 +2092,7 @@
           } catch (error) {
             setStatus(elements.outputStatus, `元数据拉取失败: ${error.message}`, "error");
           } finally {
-            elements.fetchSub2apiMeta.disabled = !state.isAuthenticated;
+            elements.fetchSub2apiMeta.disabled = false;
             elements.fetchSub2apiMeta.textContent = originalText;
             // 触发表单数据更新状态
             elements.groups.dispatchEvent(new Event('change'));
@@ -2293,12 +2107,13 @@
           }
 
           const sub2apiUrl = getSub2ApiEndpoint();
-          if (!state.isAuthenticated) {
-            setStatus(elements.outputStatus, "请先登录 TokenManager 服务器。", "error");
+          const bearerToken = getSub2ApiBearerToken();
+          if (!sub2apiUrl) {
+            setStatus(elements.outputStatus, "请填写 sub2api URL。", "error");
             return;
           }
-          if (!sub2apiUrl) {
-            setStatus(elements.outputStatus, "缺少服务器导入端点。", "error");
+          if (!bearerToken) {
+            setStatus(elements.outputStatus, "请填写 sub2api Bearer Token。", "error");
             return;
           }
 
@@ -2323,7 +2138,7 @@
           } catch (error) {
             setStatus(elements.outputStatus, error instanceof Error ? error.message : "导入到 sub2api 失败。", "error");
           } finally {
-            updateImportButtonState();
+            elements.importSub2api.disabled = !state.converted.length;
           }
         }
 
@@ -2427,9 +2242,6 @@
 
         elements.fetchSub2apiMeta.addEventListener("click", fetchSub2ApiMeta);
         elements.refreshServerAccounts.addEventListener("click", refreshServerAccounts);
-        elements.tokenManagerLoginForm.addEventListener("submit", loginTokenManager);
-        elements.tokenManagerLogout.addEventListener("click", logoutTokenManager);
-        elements.refreshAuthState.addEventListener("click", () => refreshAuthState({ refreshAccounts: true }));
 
         elements.input.addEventListener("input", scheduleConvert);
         elements.copyOutput.addEventListener("click", copyOutput);
@@ -2453,8 +2265,6 @@
 
         updateOutput();
         renderServerAccounts();
-        updateAuthUi();
-        refreshAuthState({ refreshAccounts: true });
       })();
     </script>
   </body>

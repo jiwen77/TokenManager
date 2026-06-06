@@ -2,7 +2,10 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const http = require("node:http");
+const os = require("node:os");
+const path = require("node:path");
 const { test } = require("node:test");
 const { createSub2ApiBrowserDefaults, createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, verifyPasswordHash } = require("../server/tokenmanager-bff");
 
@@ -234,6 +237,65 @@ test("login sets an HttpOnly cookie without returning any bearer token", async (
     await mock.close();
   }
 });
+
+test("config save persists server-side sub2api settings and proxy uses saved bearer", async () => {
+  const upstreamRequests = [];
+  const mock = await startMockSub2Api(async (req, res) => {
+    upstreamRequests.push({ method: req.method, url: req.url, authorization: req.headers.authorization });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ data: { items: [], total: 0 } }));
+  });
+  const runtimeConfigFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tokenmanager-config-")), "runtime-config.json");
+  const bff = await startBff({ runtimeConfigFile }, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const saved = await fetchJson(`${bff.baseUrl}/token-manager-auth/config`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sub2api_default_origin: new URL(mock.baseUrl).origin,
+        sub2api_import_path: "/api/v1/admin/accounts/data",
+        sub2api_bearer_token: "runtime-bearer-token",
+        group_ids: [1, "custom"],
+        proxy_id: 7,
+        priority: 3,
+        rate_multiplier: 1.5,
+      }),
+    });
+    assert.equal(saved.response.status, 200);
+    assert.equal(saved.body.sub2api_default_origin, new URL(mock.baseUrl).origin);
+    assert.equal(saved.body.sub2api_has_bearer_token, true);
+    assert.deepEqual(saved.body.group_ids, [1, "custom"]);
+    assert.equal(saved.body.proxy_id, 7);
+    assert.equal(saved.body.priority, 3);
+    assert.equal(saved.body.rate_multiplier, 1.5);
+    assert.equal(saved.body.sub2api_bearer_token, undefined);
+
+    const persisted = JSON.parse(fs.readFileSync(runtimeConfigFile, "utf8"));
+    assert.equal(persisted.sub2apiBearerToken, "runtime-bearer-token");
+
+    const proxied = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts?page=1`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(proxied.response.status, 200);
+    assert.equal(
+      upstreamRequests.some((request) => request.url === "/api/v1/admin/accounts?page=1" && request.authorization === "Bearer runtime-bearer-token"),
+      true,
+    );
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
 
 test("config reports proxy mode when auth-only is disabled", async () => {
   const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());

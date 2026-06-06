@@ -10,6 +10,8 @@ token*.json
 tokens*.json
 auth*.json
 credentials*.json
+server/runtime-config.json
+server/runtime-config.*.json
 
 # Agent/runtime state and logs may contain local paths, diagnostics, or secrets
 .omx/

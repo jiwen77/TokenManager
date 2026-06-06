@@ -6,7 +6,7 @@
 
 ## 推荐：页面门禁 + 服务端代理模式
 
-Hostdzire-LA 当前应使用服务端代理模式：浏览器只访问 TokenManager，同源请求 `/token-manager-api/*`；BFF 在服务器上访问本机 sub2api。
+Hostdzire-LA 当前应使用服务端代理模式：浏览器只访问 TokenManager，同源请求 `/token-manager-api/*`；BFF 在服务器上访问本机 sub2api。页面里的“保存配置”会写入服务器运行时配置文件，默认是 `server/runtime-config.json`。
 
 ```bash
 TOKENMANAGER_AUTH_ONLY=false
@@ -14,6 +14,7 @@ TOKENMANAGER_SESSION_SECRET=<至少32字节随机字符串>
 TOKENMANAGER_PASSWORD_HASH=<node server/tokenmanager-bff.js hash-password 生成>
 TOKENMANAGER_HOST=127.0.0.1
 TOKENMANAGER_PORT=8787
+TOKENMANAGER_CONFIG_FILE=/opt/tokenmanager/server/runtime-config.json
 
 # BFF 在 Hostdzire-LA 上访问 sub2api，本机地址只给服务器进程用。
 SUB2API_BASE_URL=http://127.0.0.1:8080/api/v1
@@ -35,7 +36,22 @@ Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-ma
 - 如需临时留存明文密码用于找回，应放在服务器 root-only 文件或密码管理器中，权限建议 `600`；确认已记录后可以删除该明文文件。
 - `SUB2API_BASE_URL` 是 BFF 服务端代理上游地址，给 Node 在服务器上访问用；这里可以用服务器内网 `127.0.0.1`。
 - `SUB2API_ADMIN_*` / `SUB2API_JWT_SECRET` / `SUB2API_ADMIN_BEARER_TOKEN` 只保存在服务器 `.env`，不要提交到 git。
-- `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` / `TOKENMANAGER_SUB2API_IMPORT_PATH` 是浏览器直连模式的非敏感默认值；服务端代理模式下页面会隐藏地址和 Bearer Token 输入。
+- 页面“保存配置”写入 `TOKENMANAGER_CONFIG_FILE` 指向的 JSON；它可能包含 Bearer Token，权限应保持 `600`，也不要提交到 git。
+- `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` / `TOKENMANAGER_SUB2API_IMPORT_PATH` 是页面初始默认值；保存配置后，运行时 JSON 会覆盖这些默认值。
+
+
+## 页面保存配置
+
+登录 TokenManager 后，页面里的“保存配置”会持久化这些字段到服务器运行时配置文件：
+
+- sub2api 服务器地址
+- Bearer Token（如输入；留空保存会继续沿用服务器已有认证）
+- 绑定分组
+- 绑定代理
+- Priority
+- Rate Multiplier
+
+保存后的 Bearer Token 不会通过 `/token-manager-auth/config` 明文返回给页面；页面只会知道服务器端已有认证。
 
 ## 可选：浏览器直连模式默认地址字段
 

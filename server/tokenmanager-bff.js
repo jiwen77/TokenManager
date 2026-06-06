@@ -209,6 +209,146 @@ function createSub2ApiBrowserDefaultUrl(env = process.env) {
 }
 
 
+function normalizeSub2ApiSelectionId(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const stringValue = String(value).trim();
+  return /^\d+$/.test(stringValue) ? Number.parseInt(stringValue, 10) : stringValue;
+}
+
+function normalizeSub2ApiGroupIds(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map(normalizeSub2ApiSelectionId)
+    .filter((item) => item !== null);
+}
+
+function normalizeFiniteNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function sanitizeRuntimeConfig(value = {}, current = {}) {
+  const next = { ...current };
+  const origin = String(value.sub2api_default_origin ?? value.sub2apiDefaultOrigin ?? value.sub2api_origin ?? value.sub2apiOrigin ?? "").trim();
+  if (origin) {
+    next.sub2apiOrigin = origin;
+  }
+
+  const importPath = String(value.sub2api_import_path ?? value.sub2apiImportPath ?? "").trim();
+  if (importPath) {
+    next.sub2apiImportPath = normalizePublicPath(importPath, "/api/v1/admin/accounts/data");
+  }
+
+  if (value.clear_sub2api_bearer_token === true || value.clearSub2apiBearerToken === true) {
+    delete next.sub2apiBearerToken;
+  } else {
+    const bearerToken = String(value.sub2api_bearer_token ?? value.sub2apiBearerToken ?? "").trim();
+    if (bearerToken) {
+      next.sub2apiBearerToken = bearerToken.replace(/^Bearer\s+/i, "");
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "group_ids") || Object.prototype.hasOwnProperty.call(value, "groupIds")) {
+    next.groupIds = normalizeSub2ApiGroupIds(value.group_ids ?? value.groupIds);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "proxy_id") || Object.prototype.hasOwnProperty.call(value, "proxyId")) {
+    next.proxyId = normalizeSub2ApiSelectionId(value.proxy_id ?? value.proxyId);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "priority")) {
+    next.priority = normalizeFiniteNumber(value.priority, current.priority ?? 1);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "rate_multiplier") || Object.prototype.hasOwnProperty.call(value, "rateMultiplier")) {
+    next.rateMultiplier = normalizeFiniteNumber(value.rate_multiplier ?? value.rateMultiplier, current.rateMultiplier ?? 1);
+  }
+
+  next.updatedAt = new Date().toISOString();
+  return next;
+}
+
+class RuntimeConfigStore {
+  constructor(filePath) {
+    this.filePath = filePath;
+  }
+
+  read() {
+    if (!this.filePath || !fs.existsSync(this.filePath)) {
+      return {};
+    }
+    try {
+      return sanitizeRuntimeConfig(JSON.parse(fs.readFileSync(this.filePath, "utf8")), {});
+    } catch {
+      return {};
+    }
+  }
+
+  write(value) {
+    if (!this.filePath) {
+      return value;
+    }
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+    const tmp = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    fs.renameSync(tmp, this.filePath);
+    try {
+      fs.chmodSync(this.filePath, 0o600);
+    } catch {
+      // Best effort on filesystems that do not support chmod.
+    }
+    return value;
+  }
+
+  update(patch) {
+    const current = this.read();
+    const next = sanitizeRuntimeConfig(patch, current);
+    return this.write(next);
+  }
+}
+
+function getEffectiveSub2ApiProxyConfig(config, runtimeConfig = {}) {
+  const defaults = config.sub2apiBrowserDefaults || createSub2ApiBrowserDefaults({});
+  const importPath = runtimeConfig.sub2apiImportPath || defaults.importPath || "/api/v1/admin/accounts/data";
+  const origin = runtimeConfig.sub2apiOrigin || defaults.origin || "";
+  const adminBasePath = getAdminBasePathFromImportPath(importPath);
+  return {
+    sub2apiBaseUrl: origin ? joinUrlParts(origin, adminBasePath) : config.sub2apiBaseUrl,
+    sub2apiAdminApiKey: config.sub2apiAdminApiKey,
+    sub2apiAdminBearerToken: runtimeConfig.sub2apiBearerToken || config.sub2apiAdminBearerToken,
+    importPath,
+    adminBasePath,
+    origin,
+  };
+}
+
+function buildPublicConfig(config, runtimeConfig = {}) {
+  const defaults = config.sub2apiBrowserDefaults || createSub2ApiBrowserDefaults({});
+  const importPath = runtimeConfig.sub2apiImportPath || defaults.importPath || "/api/v1/admin/accounts/data";
+  const origin = runtimeConfig.sub2apiOrigin || defaults.origin || "";
+  const adminBasePath = getAdminBasePathFromImportPath(importPath);
+  return {
+    sub2api_proxy_enabled: !config.authOnly,
+    sub2api_default_origin: origin,
+    sub2api_admin_base_path: adminBasePath,
+    sub2api_import_path: importPath,
+    sub2api_api_base_path: adminBasePath,
+    sub2api_default_url: origin ? joinUrlParts(origin, adminBasePath) : adminBasePath,
+    sub2api_has_bearer_token: Boolean(runtimeConfig.sub2apiBearerToken || config.sub2apiAdminBearerToken),
+    sub2api_server_auth_configured: Boolean(runtimeConfig.sub2apiBearerToken || config.sub2apiAdminApiKey || config.sub2apiAdminBearerToken || config.sub2apiJwtSecret || config.sub2apiAdminPassword),
+    group_ids: normalizeSub2ApiGroupIds(runtimeConfig.groupIds),
+    proxy_id: runtimeConfig.proxyId ?? null,
+    priority: normalizeFiniteNumber(runtimeConfig.priority, 1),
+    rate_multiplier: normalizeFiniteNumber(runtimeConfig.rateMultiplier, 1),
+    updated_at: runtimeConfig.updatedAt,
+  };
+}
+
+
 function createConfig(env = process.env) {
   const cookieSecure = parseBoolean(env.TOKENMANAGER_COOKIE_SECURE, env.NODE_ENV !== "development");
   const cookieName = env.TOKENMANAGER_COOKIE_NAME
@@ -238,6 +378,7 @@ function createConfig(env = process.env) {
     cookieSecure,
     cookieSameSite: env.TOKENMANAGER_COOKIE_SAMESITE || "Lax",
     cookiePath: env.TOKENMANAGER_COOKIE_PATH || "/",
+    runtimeConfigFile: env.TOKENMANAGER_CONFIG_FILE || path.join(__dirname, "runtime-config.json"),
     maxBodyBytes: parsePositiveInteger(env.TOKENMANAGER_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES),
     upstreamTimeoutMs: parsePositiveInteger(env.TOKENMANAGER_UPSTREAM_TIMEOUT_MS, 30000),
   };
@@ -788,17 +929,19 @@ function copyUpstreamHeaders(upstreamHeaders) {
   return headers;
 }
 
-async function proxyOnce(req, parsedUrl, bodyBuffer, config, tokenManager, forceTokenRefresh = false) {
-  const accessToken = config.sub2apiAdminApiKey ? "" : await tokenManager.getAccessToken({ force: forceTokenRefresh });
-  const targetUrl = joinUrl(config.sub2apiBaseUrl, getProxyPath(parsedUrl.pathname), parsedUrl.search);
+async function proxyOnce(req, parsedUrl, bodyBuffer, config, tokenManager, runtimeConfig = {}, forceTokenRefresh = false) {
+  const effective = getEffectiveSub2ApiProxyConfig(config, runtimeConfig);
+  const usesStaticCredential = Boolean(effective.sub2apiAdminApiKey || effective.sub2apiAdminBearerToken);
+  const accessToken = usesStaticCredential ? effective.sub2apiAdminBearerToken : await tokenManager.getAccessToken({ force: forceTokenRefresh });
+  const targetUrl = joinUrl(effective.sub2apiBaseUrl, getProxyPath(parsedUrl.pathname), parsedUrl.search);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.upstreamTimeoutMs);
   try {
     const headers = {
       Accept: req.headers.accept || "application/json",
     };
-    if (config.sub2apiAdminApiKey) {
-      headers["x-api-key"] = config.sub2apiAdminApiKey;
+    if (effective.sub2apiAdminApiKey) {
+      headers["x-api-key"] = effective.sub2apiAdminApiKey;
     } else {
       headers.Authorization = `Bearer ${accessToken}`;
     }
@@ -818,7 +961,7 @@ async function proxyOnce(req, parsedUrl, bodyBuffer, config, tokenManager, force
 }
 
 async function handleProxy(req, res, parsedUrl, context) {
-  const { config, sessions, tokenManager } = context;
+  const { config, sessions, tokenManager, runtimeConfigStore } = context;
   if (!sessions.fromRequest(req)) {
     jsonResponse(res, 401, { error: "not_authenticated" });
     return;
@@ -833,10 +976,12 @@ async function handleProxy(req, res, parsedUrl, context) {
   }
 
   const bodyBuffer = SAFE_METHODS.has(req.method) ? Buffer.alloc(0) : await readRequestBody(req, config.maxBodyBytes);
-  let upstream = await proxyOnce(req, parsedUrl, bodyBuffer, config, tokenManager, false);
-  if (upstream.status === 401 && !config.sub2apiAdminApiKey) {
+  const runtimeConfig = runtimeConfigStore.read();
+  const effective = getEffectiveSub2ApiProxyConfig(config, runtimeConfig);
+  let upstream = await proxyOnce(req, parsedUrl, bodyBuffer, config, tokenManager, runtimeConfig, false);
+  if (upstream.status === 401 && !effective.sub2apiAdminApiKey && !effective.sub2apiAdminBearerToken) {
     tokenManager.clear();
-    upstream = await proxyOnce(req, parsedUrl, bodyBuffer, config, tokenManager, true);
+    upstream = await proxyOnce(req, parsedUrl, bodyBuffer, config, tokenManager, runtimeConfig, true);
   }
 
   const responseBuffer = Buffer.from(await upstream.arrayBuffer());
@@ -848,7 +993,7 @@ async function handleProxy(req, res, parsedUrl, context) {
 }
 
 async function handleAuth(req, res, parsedUrl, context) {
-  const { config, sessions } = context;
+  const { config, sessions, runtimeConfigStore } = context;
   const pathname = parsedUrl.pathname;
 
   if (pathname === "/token-manager-auth/health") {
@@ -888,24 +1033,20 @@ async function handleAuth(req, res, parsedUrl, context) {
   }
 
   if (pathname === "/token-manager-auth/config") {
-    if (req.method !== "GET") return methodNotAllowed(res);
+    if (!["GET", "POST"].includes(req.method)) return methodNotAllowed(res);
     const session = sessions.fromRequest(req);
     if (!session) {
       jsonResponse(res, 401, { error: "not_authenticated" });
       return;
     }
-    const defaults = config.sub2apiBrowserDefaults || createSub2ApiBrowserDefaults({});
-    jsonResponse(res, 200, {
-      sub2api_proxy_enabled: !config.authOnly,
-      sub2api_default_origin: defaults.origin || "",
-      sub2api_admin_base_path: defaults.adminBasePath || "/api/v1",
-      sub2api_import_path: defaults.importPath || "/api/v1/admin/accounts/data",
-      // Backward-compatible aliases for older static pages.
-      sub2api_api_base_path: defaults.adminBasePath || "/api/v1",
-      sub2api_default_url: defaults.origin
-        ? joinUrlParts(defaults.origin, defaults.adminBasePath || "/api/v1")
-        : (defaults.adminBasePath || "/api/v1"),
-    }, {
+    if (req.method === "POST") {
+      assertStateChangingRequestIsSameOrigin(req);
+      const payload = await readJsonBody(req, config.maxBodyBytes);
+      const next = runtimeConfigStore.update(payload);
+      jsonResponse(res, 200, buildPublicConfig(config, next), { "Cache-Control": "no-store" });
+      return;
+    }
+    jsonResponse(res, 200, buildPublicConfig(config, runtimeConfigStore.read()), {
       "Cache-Control": "no-store",
     });
     return;
@@ -967,7 +1108,8 @@ function createTokenManagerServer(options = {}) {
   const logger = options.logger || console;
   const sessions = options.sessions || new SessionManager(config);
   const tokenManager = options.tokenManager || new Sub2ApiTokenManager(config, logger);
-  const context = { config, logger, sessions, tokenManager };
+  const runtimeConfigStore = options.runtimeConfigStore || new RuntimeConfigStore(config.runtimeConfigFile);
+  const context = { config, logger, sessions, tokenManager, runtimeConfigStore };
 
   return http.createServer(async (req, res) => {
     try {
@@ -1034,12 +1176,14 @@ if (require.main === module) {
 
 module.exports = {
   ALLOWED_PROXY_ROUTES,
+  RuntimeConfigStore,
   SessionManager,
   Sub2ApiTokenManager,
   createConfig,
   createSub2ApiBrowserDefaults,
   createSub2ApiBrowserDefaultUrl,
   createTokenManagerServer,
+  getEffectiveSub2ApiProxyConfig,
   hashPassword,
   hmac,
   loadEnvFile,

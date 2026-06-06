@@ -621,7 +621,7 @@ async function testServerProxyModeImportsWithoutBrowserBearer() {
 
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(elements.get("#sub2api-browser-config").hidden, true);
+  assert.equal(elements.get("#sub2api-browser-config").hidden, false);
   assert.match(elements.get("#sub2api-config-hint").textContent, /服务器代理模式已启用/);
 
   const input = elements.get("#session-input");
@@ -645,6 +645,76 @@ async function testServerProxyModeImportsWithoutBrowserBearer() {
     capturedRequests.some((request) => request.url.startsWith("/token-manager-api/admin/accounts?")),
     "server proxy mode should refresh server accounts through BFF",
   );
+}
+
+async function testSaveSub2apiConfigPostsServerSettings() {
+  const capturedPosts = [];
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://api.wenlab.link",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url, options = {}) => {
+      if (url === "/token-manager-auth/config" && options.method === "POST") {
+        capturedPosts.push(JSON.parse(options.body));
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            sub2api_proxy_enabled: true,
+            sub2api_default_origin: "https://remote.example.com",
+            sub2api_import_path: "/api/v1/admin/accounts/data",
+            sub2api_has_bearer_token: true,
+            group_ids: [1, "custom"],
+            proxy_id: 7,
+            priority: 3,
+            rate_multiplier: 1.5,
+          }),
+        };
+      }
+      if (url === "/token-manager-auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sub2api_proxy_enabled: true,
+            sub2api_default_origin: "https://api.wenlab.link",
+            sub2api_import_path: "/api/v1/admin/accounts/data",
+          }),
+        };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  elements.get("#sub2api-url").value = "https://remote.example.com";
+  elements.get("#sub2api-token").value = "Bearer runtime-token";
+  elements.get("#sub2api-groups").selectedOptions = [{ value: "1" }, { value: "custom" }];
+  dispatch(elements.get("#sub2api-groups"), "change");
+  elements.get("#sub2api-proxy").value = "7";
+  dispatch(elements.get("#sub2api-proxy"), "change");
+  elements.get("#sub2api-priority").value = "3";
+  dispatch(elements.get("#sub2api-priority"), "input");
+  elements.get("#sub2api-rate-multiplier").value = "1.5";
+  dispatch(elements.get("#sub2api-rate-multiplier"), "input");
+  dispatch(elements.get("#save-sub2api-config"), "click");
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(capturedPosts.length, 1);
+  assert.equal(capturedPosts[0].sub2api_default_origin, "https://remote.example.com");
+  assert.equal(capturedPosts[0].sub2api_bearer_token, "Bearer runtime-token");
+  assert.deepEqual(capturedPosts[0].group_ids, [1, "custom"]);
+  assert.equal(capturedPosts[0].proxy_id, 7);
+  assert.equal(capturedPosts[0].priority, 3);
+  assert.equal(capturedPosts[0].rate_multiplier, 1.5);
+  assert.equal(elements.get("#sub2api-token").value, "");
+  assert.match(elements.get("#output-status").textContent, /配置已保存到服务器/);
 }
 
 async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
@@ -844,6 +914,7 @@ async function main() {
   await testServerDefaultSub2apiUrlHydratesInput();
   await testSub2apiUrlShorthandNormalizesToApiEndpoints();
   await testServerProxyModeImportsWithoutBrowserBearer();
+  await testSaveSub2apiConfigPostsServerSettings();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
   await testRefreshServerAccountsFetchesPersistedAccounts();
   await testUrlTokenDoesNotHydrateBearerOrFetchAccounts();

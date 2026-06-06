@@ -982,6 +982,9 @@
                 </div>
               </div>
 
+              <div class="actions" style="margin-top: 10px; justify-content: flex-start;">
+                <button class="button button-primary" id="save-sub2api-config" type="button">保存配置</button>
+              </div>
               <div class="config-hint" id="sub2api-config-hint" style="margin-top: 10px;">只需填写 sub2api 的服务器地址（域名或 ip:端口）；完整导入路径由服务器 .env 自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。</div>
             </div>
             <section class="server-accounts-card" aria-labelledby="server-accounts-title">
@@ -1068,6 +1071,7 @@
           pickFiles: document.querySelector("#pick-files"),
           refreshServerAccounts: document.querySelector("#refresh-server-accounts"),
           serverAccountBody: document.querySelector("#server-account-body"),
+          saveSub2apiConfig: document.querySelector("#save-sub2api-config"),
           serverAccountStatus: document.querySelector("#server-account-status"),
           sub2apiBrowserConfig: document.querySelector("#sub2api-browser-config"),
           sub2apiConfigHint: document.querySelector("#sub2api-config-hint"),
@@ -2119,13 +2123,44 @@
         }
 
         function updateSub2ApiConnectionMode() {
+          elements.sub2apiBrowserConfig.hidden = false;
           if (state.sub2apiProxyEnabled) {
-            elements.sub2apiBrowserConfig.hidden = true;
-            elements.sub2apiConfigHint.textContent = "服务器代理模式已启用：浏览器不会接触 sub2api 地址或 Bearer Token；Hostdzire-LA 上的 TokenManager BFF 会使用服务器环境变量访问本机 sub2api。";
+            elements.sub2apiConfigHint.textContent = "服务器代理模式已启用：这里填写/保存的 sub2api 地址、Bearer Token、分组和代理会保存在服务器；导入请求由 TokenManager BFF 发起，浏览器不会直接访问 sub2api。";
           } else {
-            elements.sub2apiBrowserConfig.hidden = false;
-            elements.sub2apiConfigHint.textContent = "只需填写 sub2api 的服务器地址（域名或 ip:端口）；完整导入路径由服务器 .env 自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。";
+            elements.sub2apiConfigHint.textContent = "浏览器直连模式：这里的地址和 Bearer Token 只在当前页面请求 sub2api 时使用；如需跨设备持久化，请部署并登录 BFF。";
           }
+        }
+
+        function applySavedSub2ApiSelectionsToControls() {
+          const selectedGroupSet = new Set(state.selectedGroups.map((item) => String(item)));
+          Array.from(elements.groups.options || []).forEach((option) => {
+            option.selected = selectedGroupSet.has(String(option.value));
+          });
+          elements.proxy.value = state.selectedProxy === null || state.selectedProxy === undefined ? "" : String(state.selectedProxy);
+        }
+
+        function hydrateSavedSub2ApiSettings(payload) {
+          if (Array.isArray(payload.group_ids)) {
+            state.selectedGroups = payload.group_ids
+              .map((value) => /^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value))
+              .filter((value) => value !== "");
+          }
+          if (Object.prototype.hasOwnProperty.call(payload, "proxy_id")) {
+            const value = payload.proxy_id;
+            state.selectedProxy = value === null || value === undefined || value === "" ? null : (/^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value));
+          }
+          if (Number.isFinite(Number(payload.priority))) {
+            state.priority = Number(payload.priority);
+            elements.priority.value = String(state.priority);
+          }
+          if (Number.isFinite(Number(payload.rate_multiplier))) {
+            state.rateMultiplier = Number(payload.rate_multiplier);
+            elements.rateMultiplier.value = String(state.rateMultiplier);
+          }
+          if (payload.sub2api_has_bearer_token || payload.sub2api_server_auth_configured) {
+            elements.sub2apiToken.placeholder = "服务器已保存认证；留空保存不会覆盖";
+          }
+          applySavedSub2ApiSelectionsToControls();
         }
 
         function hydrateSub2ApiBrowserConfig(payload) {
@@ -2161,6 +2196,8 @@
               elements.sub2apiUrl.value = adminBasePath;
             }
           }
+
+          hydrateSavedSub2ApiSettings(payload);
         }
 
         async function hydrateSub2ApiDefaults() {
@@ -2179,6 +2216,49 @@
             hydrateSub2ApiBrowserConfig(await response.json());
           } catch {
             // Static/local usage does not require the BFF config endpoint.
+          }
+        }
+
+        async function saveSub2ApiConfig() {
+          if (!canLoadServerDefaults()) {
+            setStatus(elements.outputStatus, "本地静态页面无法保存服务器配置。", "error");
+            return;
+          }
+
+          elements.saveSub2apiConfig.disabled = true;
+          const originalText = elements.saveSub2apiConfig.textContent;
+          elements.saveSub2apiConfig.textContent = "保存中...";
+
+          try {
+            const response = await fetch("/token-manager-auth/config", {
+              method: "POST",
+              cache: "no-store",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                sub2api_default_origin: elements.sub2apiUrl.value.trim(),
+                sub2api_import_path: sub2apiBrowserConfig.importPath,
+                sub2api_bearer_token: elements.sub2apiToken.value.trim(),
+                group_ids: state.selectedGroups,
+                proxy_id: state.selectedProxy,
+                priority: state.priority,
+                rate_multiplier: state.rateMultiplier,
+              }),
+            });
+            const payload = await readJsonResponse(response);
+            if (!response.ok) {
+              throw new Error(getErrorMessageFromResponseBody(payload, `HTTP ${response.status}`));
+            }
+            hydrateSub2ApiBrowserConfig(payload || {});
+            elements.sub2apiToken.value = "";
+            setStatus(elements.outputStatus, "配置已保存到服务器。", "ok");
+          } catch (error) {
+            setStatus(elements.outputStatus, error instanceof Error ? error.message : "保存配置失败。", "error");
+          } finally {
+            elements.saveSub2apiConfig.disabled = false;
+            elements.saveSub2apiConfig.textContent = originalText;
           }
         }
 
@@ -2379,6 +2459,7 @@
               elements.proxy.innerHTML = '<option value="">未获取到可用代理数据</option>';
             }
 
+            applySavedSub2ApiSelectionsToControls();
             setStatus(elements.outputStatus, "成功获取分组合代理元数据，可进行配置绑定。", "ok");
           } catch (error) {
             setStatus(elements.outputStatus, `元数据拉取失败: ${error.message}`, "error");
@@ -2541,6 +2622,7 @@
 
         elements.fetchSub2apiMeta.addEventListener("click", fetchSub2ApiMeta);
         elements.refreshServerAccounts.addEventListener("click", refreshServerAccounts);
+        elements.saveSub2apiConfig.addEventListener("click", saveSub2ApiConfig);
         elements.sub2apiTokenToggle.addEventListener("click", () => {
           const isVisible = elements.sub2apiToken.type === "text";
           elements.sub2apiToken.type = isVisible ? "password" : "text";

@@ -1282,23 +1282,51 @@
           elements.proxy.value = state.selectedProxies.length ? String(state.selectedProxies[0]) : "";
         }
 
-        function getGroupLabel(value) {
-          const key = String(value);
-          const fromKnown = getKnownGroupItems().find((item) => String(item.value) === key);
-          return fromKnown?.label || `分组 ${key}`;
+        function normalizeSelectionList(values) {
+          return (Array.isArray(values) ? values : [])
+            .map(normalizeBindingId)
+            .filter((value) => value !== "");
         }
 
-        function getProxyLabel(value) {
-          const key = String(value);
-          const fromKnown = getKnownProxyItems().find((item) => String(item.value) === key);
-          return fromKnown?.label || `代理 ${key}`;
+        function normalizeSelectionLookupKey(value, labelPrefix = "") {
+          let key = String(value ?? "").trim().toLowerCase();
+          const prefix = String(labelPrefix || "").trim().toLowerCase();
+          if (prefix && key.startsWith(`${prefix} `)) {
+            key = key.slice(prefix.length).trim();
+          }
+          return key.replace(/\s+/g, " ");
+        }
+
+        function reconcileSelectionsToKnownIds(values, knownItems, labelPrefix = "") {
+          const knownByValue = new Map();
+          const knownByLabel = new Map();
+          knownItems.forEach((item) => {
+            const normalizedValue = normalizeBindingId(item.value);
+            knownByValue.set(String(normalizedValue), normalizedValue);
+            knownByLabel.set(normalizeSelectionLookupKey(item.label, labelPrefix), normalizedValue);
+          });
+
+          const seen = new Set();
+          return normalizeSelectionList(values)
+            .map((value) => {
+              const valueKey = String(value);
+              return knownByValue.has(valueKey)
+                ? knownByValue.get(valueKey)
+                : knownByLabel.get(normalizeSelectionLookupKey(value, labelPrefix)) ?? value;
+            })
+            .filter((value) => {
+              const key = String(value);
+              if (seen.has(key)) {
+                return false;
+              }
+              seen.add(key);
+              return true;
+            });
         }
 
         function setSelectedGroups(nextGroups, options = {}) {
           const seen = new Set();
-          state.selectedGroups = (Array.isArray(nextGroups) ? nextGroups : [])
-            .map(normalizeBindingId)
-            .filter((value) => value !== "")
+          state.selectedGroups = normalizeSelectionList(nextGroups)
             .filter((value) => {
               const key = String(value);
               if (seen.has(key)) {
@@ -1316,9 +1344,7 @@
 
         function setSelectedProxies(nextProxies, options = {}) {
           const seen = new Set();
-          state.selectedProxies = (Array.isArray(nextProxies) ? nextProxies : [])
-            .map(normalizeBindingId)
-            .filter((value) => value !== "")
+          state.selectedProxies = normalizeSelectionList(nextProxies)
             .filter((value) => {
               const key = String(value);
               if (seen.has(key)) {
@@ -1364,12 +1390,9 @@
             return;
           }
 
-          const visible = state.selectedGroups.slice(0, 5);
-          const hiddenCount = state.selectedGroups.length - visible.length;
           elements.groupSummary.innerHTML = [
             `<span class="group-chip">已选 ${state.selectedGroups.length} 个</span>`,
-            ...visible.map((value) => `<span class="group-chip" title="${escapeHtml(getGroupLabel(value))}">${escapeHtml(getGroupLabel(value))}</span>`),
-            hiddenCount > 0 ? `<span class="group-chip is-muted">+${hiddenCount}</span>` : "",
+            '<span class="group-chip is-muted">下方列表已勾选，可继续修改</span>',
           ].filter(Boolean).join("");
         }
 
@@ -1379,12 +1402,9 @@
             return;
           }
 
-          const visible = state.selectedProxies.slice(0, 5);
-          const hiddenCount = state.selectedProxies.length - visible.length;
           elements.proxySummary.innerHTML = [
             `<span class="group-chip">已选 ${state.selectedProxies.length} 个</span>`,
-            ...visible.map((value) => `<span class="group-chip" title="${escapeHtml(getProxyLabel(value))}">${escapeHtml(getProxyLabel(value))}</span>`),
-            hiddenCount > 0 ? `<span class="group-chip is-muted">+${hiddenCount}</span>` : "",
+            '<span class="group-chip is-muted">下方列表已勾选，可继续修改</span>',
           ].filter(Boolean).join("");
         }
 
@@ -1466,17 +1486,13 @@
           }
           hydrateServerAccountCache(payload);
           if (Array.isArray(payload.group_ids)) {
-            state.selectedGroups = payload.group_ids
-              .map((value) => /^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value))
-              .filter((value) => value !== "");
+            state.selectedGroups = normalizeSelectionList(payload.group_ids);
           }
           if (Array.isArray(payload.proxy_ids)) {
-            setSelectedProxies(payload.proxy_ids
-              .map((value) => /^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value))
-              .filter((value) => value !== ""), { schedule: false });
+            state.selectedProxies = normalizeSelectionList(payload.proxy_ids);
           } else if (Object.prototype.hasOwnProperty.call(payload, "proxy_id")) {
             const value = payload.proxy_id;
-            setSelectedProxies(value === null || value === undefined || value === "" ? [] : [/^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value)], { schedule: false });
+            state.selectedProxies = normalizeSelectionList(value === null || value === undefined || value === "" ? [] : [value]);
           }
           if (Number.isFinite(Number(payload.priority))) {
             state.priority = Number(payload.priority);
@@ -1494,6 +1510,8 @@
           if (payload.sub2api_has_bearer_token || payload.sub2api_server_auth_configured) {
             elements.sub2apiToken.placeholder = "服务器已保存认证；留空保存不会覆盖";
           }
+          state.selectedGroups = reconcileSelectionsToKnownIds(state.selectedGroups, getKnownGroupItems(), "分组");
+          state.selectedProxies = reconcileSelectionsToKnownIds(state.selectedProxies, getKnownProxyItems(), "代理");
           applySavedSub2ApiSelectionsToControls();
         }
 

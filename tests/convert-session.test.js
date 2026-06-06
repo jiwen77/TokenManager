@@ -624,7 +624,51 @@ function testCustomGroupPickerCheckboxUpdatesHiddenSelect() {
   });
 
   assert.deepEqual(groups.options.map((option) => option.selected), [false, true]);
-  assert.match(elements.get("#sub2api-group-summary").innerHTML, /自定义组/);
+  assert.match(elements.get("#sub2api-group-summary").innerHTML, /已选 1 个/);
+  assert.doesNotMatch(elements.get("#sub2api-group-summary").innerHTML, /自定义组/);
+}
+
+async function testLegacyNamedBindingsHydrateCheckedItems() {
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://api.wenlab.link",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url) => {
+      assert.equal(url, "/token-manager/auth/config");
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          group_ids: ["日卡 25万", "分组 日卡 50万"],
+          group_options: [{ id: 11, name: "日卡 25万" }, { id: 12, name: "日卡 50万" }],
+          proxy_ids: ["LokiProxy"],
+          proxy_options: [{ id: 6, name: "LokiProxy" }, { id: 8, name: "Oris-JP-SoNet-Static" }],
+        }),
+      };
+    },
+  });
+  elements.get("#sub2api-groups").options = [
+    { value: "11", selected: false },
+    { value: "12", selected: false },
+  ];
+  elements.get("#sub2api-proxy").options = [
+    { value: "6", selected: false },
+    { value: "8", selected: false },
+  ];
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(elements.get("#sub2api-groups").options.map((option) => option.selected), [true, true]);
+  assert.deepEqual(elements.get("#sub2api-proxy").options.map((option) => option.selected), [true, false]);
+  assert.match(elements.get("#sub2api-group-list").innerHTML, /data-group-id="11"[\s\S]*checked/);
+  assert.match(elements.get("#sub2api-group-list").innerHTML, /data-group-id="12"[\s\S]*checked/);
+  assert.match(elements.get("#sub2api-proxy-list").innerHTML, /data-proxy-id="6"[\s\S]*checked/);
+  assert.match(elements.get("#sub2api-group-summary").innerHTML, /已选 2 个/);
+  assert.doesNotMatch(elements.get("#sub2api-group-summary").innerHTML, /日卡 25万/);
 }
 
 function testCustomProxyPickerSelectsVisibleProxiesAndClears() {
@@ -1182,6 +1226,7 @@ async function main() {
   testSub2apiImportToolsOnlyVisibleForSub2apiFormat();
   testCustomGroupPickerSelectsVisibleGroupsAndClears();
   testCustomGroupPickerCheckboxUpdatesHiddenSelect();
+  await testLegacyNamedBindingsHydrateCheckedItems();
   testCustomProxyPickerSelectsVisibleProxiesAndClears();
   testFormatInputJsonAddsLineBreaks();
   await testServerDefaultSub2apiUrlHydratesInput();

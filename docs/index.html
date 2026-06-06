@@ -550,48 +550,114 @@
 
       .import-config {
         display: grid;
-        gap: 10px;
-        margin-bottom: 12px;
-        padding: 12px;
+        gap: 12px;
+        margin-bottom: 14px;
+        padding: 14px;
         border: 1px solid var(--line);
-        border-radius: var(--radius);
+        border-radius: 14px;
         background: var(--surface-soft);
+      }
+
+      .sub2api-config {
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 0.46fr);
+        grid-template-areas:
+          "connection binding"
+          "behavior binding"
+          "actions actions";
+        gap: 14px;
+        padding: 16px;
+        border-color: rgba(36, 80, 90, 0.14);
+        border-radius: 20px;
+        background:
+          radial-gradient(circle at 10% 0%, rgba(36, 80, 90, 0.10), transparent 30%),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(236, 244, 246, 0.9));
+        box-shadow: 0 18px 42px rgba(20, 33, 38, 0.08);
       }
 
       .config-section {
         display: grid;
-        gap: 10px;
-        padding: 12px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        background: var(--surface);
+        gap: 12px;
+        padding: 14px;
+        border: 1px solid rgba(185, 200, 206, 0.72);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 12px 28px rgba(20, 33, 38, 0.045);
+      }
+
+      .sub2api-config .config-section {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .sub2api-config .config-section::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 4px;
+        background: linear-gradient(180deg, var(--accent), rgba(36, 80, 90, 0.2));
+        opacity: 0.85;
+      }
+
+      .config-section.is-connection {
+        grid-area: connection;
+      }
+
+      .config-section.is-binding {
+        grid-area: binding;
+        align-content: start;
+      }
+
+      .config-section.is-behavior {
+        grid-area: behavior;
       }
 
       .config-section-head {
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
-        gap: 10px;
+        gap: 12px;
+      }
+
+      .section-title-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .step-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 32px;
+        height: 24px;
+        padding: 0 8px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent-strong);
+        font-size: 0.72rem;
+        font-weight: 900;
+        letter-spacing: 0.04em;
       }
 
       .config-section-title {
         margin: 0;
-        font-size: 0.92rem;
-        font-weight: 900;
+        font-size: 0.96rem;
+        font-weight: 950;
         color: var(--accent-strong);
       }
 
       .config-section-help {
-        margin: 3px 0 0;
+        margin: 5px 0 0;
         color: var(--muted);
-        font-size: 0.8rem;
+        font-size: 0.81rem;
         line-height: 1.45;
       }
 
       .import-config-grid {
         display: grid;
-        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-        gap: 10px;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+        gap: 12px;
       }
 
       .import-config-grid.is-balanced {
@@ -607,32 +673,44 @@
         gap: 6px;
       }
 
-      .config-field label {
+      .config-field label,
+      .field-label {
         font-size: 0.82rem;
-        font-weight: 800;
+        font-weight: 850;
         color: var(--accent-strong);
       }
 
       .config-field input,
       .config-field select {
         width: 100%;
-        min-height: 38px;
-        padding: 8px 11px;
+        min-height: 42px;
+        padding: 9px 12px;
         border: 1px solid var(--line);
-        border-radius: 6px;
+        border-radius: 10px;
         background: var(--surface);
         color: var(--text);
+        transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
       }
 
-      .config-field select[multiple] {
-        min-height: 112px;
-        padding: 6px;
+      .config-field input:hover,
+      .config-field select:hover {
+        border-color: var(--line-strong);
       }
 
       .config-field input:focus,
       .config-field select:focus {
-        outline: 2px solid rgba(36, 80, 90, 0.22);
+        outline: 0;
         border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(36, 80, 90, 0.16);
+      }
+
+      .native-group-select {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        opacity: 0;
+        pointer-events: none;
       }
 
       .field-help {
@@ -641,15 +719,177 @@
         line-height: 1.35;
       }
 
+      .binding-card {
+        display: grid;
+        gap: 12px;
+      }
+
+      .group-picker {
+        display: grid;
+        gap: 9px;
+        padding: 10px;
+        border: 1px solid rgba(185, 200, 206, 0.72);
+        border-radius: 14px;
+        background: linear-gradient(180deg, #fbfdfd, #f2f7f8);
+      }
+
+      .group-picker-top {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .group-search-input {
+        width: 100%;
+        min-height: 38px;
+        padding: 8px 11px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      .group-search-input:focus {
+        outline: 0;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(36, 80, 90, 0.14);
+      }
+
+      .group-picker-actions {
+        display: flex;
+        gap: 6px;
+        white-space: nowrap;
+      }
+
+      .tiny-button {
+        min-height: 34px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--accent-strong);
+        cursor: pointer;
+        font-size: 0.78rem;
+        font-weight: 850;
+      }
+
+      .tiny-button:hover {
+        border-color: var(--line-strong);
+        background: var(--accent-soft);
+      }
+
+      .group-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-height: 32px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .group-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        min-height: 28px;
+        padding: 4px 9px;
+        border: 1px solid rgba(36, 80, 90, 0.2);
+        border-radius: 999px;
+        background: rgba(227, 240, 242, 0.86);
+        color: var(--accent-strong);
+        font-size: 0.76rem;
+        font-weight: 850;
+      }
+
+      .group-chip.is-muted {
+        border-style: dashed;
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--muted);
+      }
+
+      .group-option-list {
+        display: grid;
+        gap: 7px;
+        max-height: 256px;
+        overflow: auto;
+        padding: 3px;
+      }
+
+      .group-option {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 9px;
+        align-items: center;
+        min-height: 46px;
+        padding: 9px 10px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.84);
+        cursor: pointer;
+        transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+      }
+
+      .group-option:hover {
+        border-color: var(--line-strong);
+        transform: translateY(-1px);
+      }
+
+      .group-option.is-selected {
+        border-color: rgba(36, 80, 90, 0.5);
+        background: #eaf5f6;
+      }
+
+      .group-option input {
+        width: 18px;
+        min-height: 18px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+
+      .group-option-name {
+        display: block;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 0.86rem;
+        font-weight: 850;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .group-option-id {
+        display: block;
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 0.72rem;
+        letter-spacing: 0.01em;
+      }
+
+      .group-empty {
+        display: grid;
+        place-items: center;
+        min-height: 92px;
+        padding: 14px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.5;
+        text-align: center;
+      }
+
       .switch-card {
         display: flex;
         align-items: flex-start;
         gap: 10px;
-        min-height: 54px;
-        padding: 10px 11px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: var(--surface-soft);
+        min-height: 58px;
+        padding: 11px 12px;
+        border: 1px solid rgba(185, 200, 206, 0.78);
+        border-radius: 12px;
+        background: linear-gradient(180deg, #fbfdfd, #f2f7f8);
         cursor: pointer;
       }
 
@@ -669,7 +909,7 @@
 
       .switch-card-help {
         display: block;
-        margin-top: 2px;
+        margin-top: 3px;
         color: var(--muted);
         font-size: 0.76rem;
         line-height: 1.35;
@@ -682,15 +922,15 @@
 
       .secret-field input {
         min-width: 0;
-        padding-right: 42px;
+        padding-right: 44px;
       }
 
       .secret-toggle {
-        width: 38px;
-        min-height: 38px;
-        margin-left: -38px;
+        width: 42px;
+        min-height: 42px;
+        margin-left: -42px;
         border-left: 1px solid var(--line);
-        border-radius: 0 6px 6px 0;
+        border-radius: 0 10px 10px 0;
         background: transparent;
         color: var(--muted);
         cursor: pointer;
@@ -718,9 +958,35 @@
       }
 
       .config-hint {
+        min-height: 58px;
+        padding: 11px 12px;
+        border: 1px solid rgba(36, 80, 90, 0.12);
+        border-radius: 12px;
+        background: rgba(227, 240, 242, 0.58);
         color: var(--muted);
-        font-size: 0.82rem;
+        font-size: 0.8rem;
         line-height: 1.45;
+      }
+
+      .sub2api-actions {
+        grid-area: actions;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: flex-start;
+        padding-top: 2px;
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
 
       .server-accounts-card {
@@ -784,6 +1050,15 @@
           grid-template-columns: 1fr;
         }
 
+        .sub2api-config {
+          grid-template-columns: 1fr;
+          grid-template-areas:
+            "connection"
+            "binding"
+            "behavior"
+            "actions";
+        }
+
         .topbar {
           align-items: flex-start;
         }
@@ -832,6 +1107,16 @@
 
         .button {
           width: 100%;
+        }
+
+        .group-picker-top {
+          grid-template-columns: 1fr;
+        }
+
+        .group-picker-actions,
+        .sub2api-actions {
+          display: grid;
+          grid-template-columns: 1fr;
         }
 
         .summary {
@@ -1023,12 +1308,15 @@
           </div>
         </div>
         <div class="panel-body">
-            <div class="import-config" aria-label="sub2api 导入配置">
-              <section class="config-section" id="sub2api-browser-config" aria-label="sub2api 连接与认证">
+            <div class="import-config sub2api-config" aria-label="sub2api 导入配置">
+              <section class="config-section is-connection" id="sub2api-browser-config" aria-label="sub2api 连接与认证">
                 <div class="config-section-head">
                   <div>
-                    <h3 class="config-section-title">连接与认证</h3>
-                    <p class="config-section-help">只填域名、IP:端口或 base URL；后端 API 路径会自动补齐。</p>
+                    <div class="section-title-row">
+                      <span class="step-pill">01</span>
+                      <h3 class="config-section-title">连接与认证</h3>
+                    </div>
+                    <p class="config-section-help">这里只填域名、IP:端口或 base URL；API 路径由 TokenManager 自动补齐。</p>
                   </div>
                 </div>
                 <div class="import-config-grid">
@@ -1040,33 +1328,52 @@
                   <div class="config-field">
                     <label for="sub2api-token">Bearer Token</label>
                     <div class="secret-field">
-                      <input id="sub2api-token" type="password" placeholder="留空保存不会覆盖已有认证" spellcheck="false" autocomplete="off" />
+                      <input id="sub2api-token" type="password" placeholder="服务器已保存认证；留空不会覆盖" spellcheck="false" autocomplete="off" />
                       <button class="secret-toggle" id="toggle-sub2api-token" type="button" aria-label="显示 Bearer Token" aria-pressed="false" title="显示 Bearer Token">
                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                           <path fill="currentColor" d="M12 5c5.5 0 9.7 4.7 10.8 6.2.3.5.3 1.1 0 1.6C21.7 14.3 17.5 19 12 19S2.3 14.3 1.2 12.8a1.4 1.4 0 0 1 0-1.6C2.3 9.7 6.5 5 12 5Zm0 2c-4.3 0-7.8 3.5-8.9 5 1.1 1.5 4.6 5 8.9 5s7.8-3.5 8.9-5C19.8 10.5 16.3 7 12 7Zm0 2.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z" />
                         </svg>
                       </button>
                     </div>
-                    <span class="field-help">保存后不会明文回显。</span>
+                    <span class="field-help">保存后不会明文回显；需要更换时重新填写即可。</span>
                   </div>
                 </div>
               </section>
 
-              <section class="config-section" aria-label="sub2api 绑定设置">
+              <section class="config-section is-binding" aria-label="sub2api 绑定设置">
                 <div class="config-section-head">
                   <div>
-                    <h3 class="config-section-title">绑定设置</h3>
-                    <p class="config-section-help">先同步元数据，再选择导入账号要绑定的分组和代理。</p>
+                    <div class="section-title-row">
+                      <span class="step-pill">02</span>
+                      <h3 class="config-section-title">绑定分组与代理</h3>
+                    </div>
+                    <p class="config-section-help">同步一次后，用搜索和勾选选择分组；不用再按 Ctrl/Cmd 多选。</p>
                   </div>
-                  <button class="button button-secondary" id="fetch-sub2api-meta" type="button">同步分组/代理</button>
+                  <button class="button button-secondary" id="fetch-sub2api-meta" type="button">同步</button>
                 </div>
-                <div class="import-config-grid is-balanced">
+                <div class="binding-card">
                   <div class="config-field">
-                    <label for="sub2api-groups">绑定分组</label>
-                    <select id="sub2api-groups" multiple>
+                    <label for="sub2api-group-search">绑定分组</label>
+                    <select id="sub2api-groups" class="native-group-select" multiple aria-hidden="true" tabindex="-1">
                       <option value="">(请先同步 sub2api 数据)</option>
                     </select>
-                    <span class="field-help">可多选；按住 Ctrl/Cmd 选择多个分组。</span>
+                    <div class="group-picker" id="sub2api-group-picker">
+                      <div class="group-picker-top">
+                        <div>
+                          <label class="sr-only" for="sub2api-group-search">搜索分组</label>
+                          <input class="group-search-input" id="sub2api-group-search" type="search" placeholder="搜索分组名或 ID" autocomplete="off" spellcheck="false" />
+                        </div>
+                        <div class="group-picker-actions" aria-label="分组快捷操作">
+                          <button class="tiny-button" id="select-all-sub2api-groups" type="button">全选可见</button>
+                          <button class="tiny-button" id="clear-sub2api-groups" type="button">清空</button>
+                        </div>
+                      </div>
+                      <div class="group-summary" id="sub2api-group-summary" aria-live="polite">未选择分组</div>
+                      <div class="group-option-list" id="sub2api-group-list" role="listbox" aria-multiselectable="true">
+                        <div class="group-empty">先点击“同步”，TokenManager 会从 sub2api 读取可用分组。</div>
+                      </div>
+                    </div>
+                    <span class="field-help">不选择分组时，导入账号不额外绑定分组。</span>
                   </div>
                   <div class="config-field">
                     <label for="sub2api-proxy">绑定代理</label>
@@ -1078,11 +1385,14 @@
                 </div>
               </section>
 
-              <section class="config-section" aria-label="sub2api 导入行为">
+              <section class="config-section is-behavior" aria-label="sub2api 导入行为">
                 <div class="config-section-head">
                   <div>
-                    <h3 class="config-section-title">导入行为</h3>
-                    <p class="config-section-help">这些值会写入导入账号的 sub2api 字段，并可保存为下次默认值。</p>
+                    <div class="section-title-row">
+                      <span class="step-pill">03</span>
+                      <h3 class="config-section-title">导入行为</h3>
+                    </div>
+                    <p class="config-section-help">这些字段会写入导入账号，并可保存为下次默认值。</p>
                   </div>
                 </div>
                 <div class="import-config-grid is-three">
@@ -1103,7 +1413,7 @@
                       <option value="ctx_pool">ctx_pool</option>
                       <option value="passthrough">passthrough</option>
                     </select>
-                    <span class="field-help">写入 OpenAI OAuth WebSocket v2 mode。</span>
+                    <span class="field-help">写入 WebSocket v2 mode。</span>
                   </div>
                 </div>
                 <div class="import-config-grid is-balanced">
@@ -1118,7 +1428,7 @@
                 </div>
               </section>
 
-              <div class="actions" style="justify-content: flex-start;">
+              <div class="sub2api-actions">
                 <button class="button button-primary" id="save-sub2api-config" type="button">保存配置</button>
                 <button class="button button-secondary" id="refresh-server-accounts-inline" type="button">刷新服务器账号</button>
               </div>
@@ -1210,6 +1520,8 @@
           rateMultiplier: 1.0,
           serverAccounts: [],
           serverAccountTotal: 0,
+          availableGroups: [],
+          groupSearch: "",
           selectedGroups: [],
           selectedProxy: null,
           sub2apiProxyEnabled: false,
@@ -1252,6 +1564,11 @@
           // 新增绑定节点
           fetchSub2apiMeta: document.querySelector("#fetch-sub2api-meta"),
           groups: document.querySelector("#sub2api-groups"),
+          groupSearch: document.querySelector("#sub2api-group-search"),
+          groupSummary: document.querySelector("#sub2api-group-summary"),
+          groupList: document.querySelector("#sub2api-group-list"),
+          selectAllGroups: document.querySelector("#select-all-sub2api-groups"),
+          clearGroups: document.querySelector("#clear-sub2api-groups"),
           proxy: document.querySelector("#sub2api-proxy"),
           priority: document.querySelector("#sub2api-priority"),
           rateMultiplier: document.querySelector("#sub2api-rate-multiplier"),
@@ -2306,11 +2623,169 @@
           }
         }
 
-        function applySavedSub2ApiSelectionsToControls() {
+        function normalizeBindingId(value) {
+          const normalized = String(value ?? "").trim();
+          if (!normalized) {
+            return "";
+          }
+          return /^\d+$/.test(normalized) ? parseInt(normalized, 10) : normalized;
+        }
+
+        function normalizeMetaItem(item) {
+          if (isPlainObject(item)) {
+            const rawId = firstNonEmpty(item.id, item.value, item.key, item.name);
+            const normalizedId = normalizeBindingId(rawId);
+            if (normalizedId === "") {
+              return null;
+            }
+            return {
+              value: normalizedId,
+              label: String(firstNonEmpty(item.name, item.label, item.title, rawId)),
+            };
+          }
+
+          const normalizedId = normalizeBindingId(item);
+          if (normalizedId === "") {
+            return null;
+          }
+          return {
+            value: normalizedId,
+            label: String(item),
+          };
+        }
+
+        function normalizeMetaItems(items) {
+          const seen = new Set();
+          return (Array.isArray(items) ? items : [])
+            .map(normalizeMetaItem)
+            .filter(Boolean)
+            .filter((item) => {
+              const key = String(item.value);
+              if (seen.has(key)) {
+                return false;
+              }
+              seen.add(key);
+              return true;
+            });
+        }
+
+        function getGroupItemsFromNativeSelect() {
+          return Array.from(elements.groups.options || [])
+            .map((option) => normalizeMetaItem({
+              id: option.value,
+              name: option.textContent || option.label || option.value,
+            }))
+            .filter(Boolean);
+        }
+
+        function getKnownGroupItems() {
+          return state.availableGroups.length ? state.availableGroups : getGroupItemsFromNativeSelect();
+        }
+
+        function setNativeGroupOptions(items, emptyText = "(暂无可用分组)") {
+          const normalizedItems = normalizeMetaItems(items);
+          state.availableGroups = normalizedItems;
+          elements.groups.innerHTML = normalizedItems.length
+            ? normalizedItems
+              .map((item) => `<option value="${escapeHtml(String(item.value))}">${escapeHtml(item.label)}</option>`)
+              .join("")
+            : `<option value="">${escapeHtml(emptyText)}</option>`;
+        }
+
+        function syncHiddenGroupSelectFromState() {
           const selectedGroupSet = new Set(state.selectedGroups.map((item) => String(item)));
           Array.from(elements.groups.options || []).forEach((option) => {
             option.selected = selectedGroupSet.has(String(option.value));
           });
+        }
+
+        function getGroupLabel(value) {
+          const key = String(value);
+          const fromKnown = getKnownGroupItems().find((item) => String(item.value) === key);
+          return fromKnown?.label || `分组 ${key}`;
+        }
+
+        function setSelectedGroups(nextGroups, options = {}) {
+          const seen = new Set();
+          state.selectedGroups = (Array.isArray(nextGroups) ? nextGroups : [])
+            .map(normalizeBindingId)
+            .filter((value) => value !== "")
+            .filter((value) => {
+              const key = String(value);
+              if (seen.has(key)) {
+                return false;
+              }
+              seen.add(key);
+              return true;
+            });
+          syncHiddenGroupSelectFromState();
+          renderGroupPicker();
+          if (options.schedule !== false) {
+            scheduleConvert();
+          }
+        }
+
+        function getFilteredGroupItems() {
+          const keyword = String(state.groupSearch || "").trim().toLowerCase();
+          const items = getKnownGroupItems();
+          if (!keyword) {
+            return items;
+          }
+          return items.filter((item) => {
+            const haystack = `${item.label} ${item.value}`.toLowerCase();
+            return haystack.includes(keyword);
+          });
+        }
+
+        function renderGroupSummary() {
+          if (!state.selectedGroups.length) {
+            elements.groupSummary.innerHTML = '<span class="group-chip is-muted">未选择分组</span>';
+            return;
+          }
+
+          const visible = state.selectedGroups.slice(0, 5);
+          const hiddenCount = state.selectedGroups.length - visible.length;
+          elements.groupSummary.innerHTML = [
+            `<span class="group-chip">已选 ${state.selectedGroups.length} 个</span>`,
+            ...visible.map((value) => `<span class="group-chip" title="${escapeHtml(getGroupLabel(value))}">${escapeHtml(getGroupLabel(value))}</span>`),
+            hiddenCount > 0 ? `<span class="group-chip is-muted">+${hiddenCount}</span>` : "",
+          ].filter(Boolean).join("");
+        }
+
+        function renderGroupPicker() {
+          renderGroupSummary();
+          const items = getFilteredGroupItems();
+          const selectedGroupSet = new Set(state.selectedGroups.map((item) => String(item)));
+          const allItems = getKnownGroupItems();
+
+          if (!allItems.length) {
+            elements.groupList.innerHTML = '<div class="group-empty">先点击“同步”，TokenManager 会从 sub2api 读取可用分组。</div>';
+            return;
+          }
+
+          if (!items.length) {
+            elements.groupList.innerHTML = '<div class="group-empty">没有匹配的分组；换个关键词试试。</div>';
+            return;
+          }
+
+          elements.groupList.innerHTML = items.map((item) => {
+            const value = String(item.value);
+            const selected = selectedGroupSet.has(value);
+            return `
+              <label class="group-option${selected ? " is-selected" : ""}" data-group-id="${escapeHtml(value)}" role="option" aria-selected="${selected}">
+                <input type="checkbox" data-group-id="${escapeHtml(value)}" ${selected ? "checked" : ""} />
+                <span>
+                  <span class="group-option-name">${escapeHtml(item.label)}</span>
+                  <span class="group-option-id">ID: ${escapeHtml(value)}</span>
+                </span>
+              </label>
+            `;
+          }).join("");
+        }
+
+        function applySavedSub2ApiSelectionsToControls() {
+          syncHiddenGroupSelectFromState();
+          renderGroupPicker();
           elements.proxy.value = state.selectedProxy === null || state.selectedProxy === undefined ? "" : String(state.selectedProxy);
         }
 
@@ -2669,12 +3144,10 @@
             ]);
 
             if (groupsRes) {
-              const groups = unwrapApiData(groupsRes);
-              if (Array.isArray(groups)) {
-                elements.groups.innerHTML = groups.map(g => `<option value="${g.id}">${escapeHtml(g.name || g.id)}</option>`).join("");
-              }
+              const groups = normalizeMetaItems(unwrapApiData(groupsRes));
+              setNativeGroupOptions(groups, "未获取到可用分组数据");
             } else {
-              elements.groups.innerHTML = '<option value="">未获取到可用分组数据</option>';
+              setNativeGroupOptions([], "未获取到可用分组数据");
             }
 
             if (proxiesRes) {
@@ -2840,11 +3313,40 @@
         });
 
         elements.groups.addEventListener("change", () => {
-          state.selectedGroups = Array.from(elements.groups.selectedOptions)
+          setSelectedGroups(Array.from(elements.groups.selectedOptions)
             .map(o => o.value)
             .filter(v => v !== "")
-            .map(v => /^\d+$/.test(v) ? parseInt(v, 10) : v);
-          scheduleConvert();
+            .map(v => /^\d+$/.test(v) ? parseInt(v, 10) : v));
+        });
+
+        elements.groupSearch.addEventListener("input", () => {
+          state.groupSearch = elements.groupSearch.value;
+          renderGroupPicker();
+        });
+
+        elements.groupList.addEventListener("change", (event) => {
+          const groupId = event.target?.dataset?.groupId;
+          if (!groupId) {
+            return;
+          }
+          const normalizedId = normalizeBindingId(groupId);
+          const selectedGroupSet = new Set(state.selectedGroups.map((item) => String(item)));
+          if (event.target.checked) {
+            selectedGroupSet.add(String(normalizedId));
+          } else {
+            selectedGroupSet.delete(String(normalizedId));
+          }
+          setSelectedGroups(Array.from(selectedGroupSet));
+        });
+
+        elements.selectAllGroups.addEventListener("click", () => {
+          const selectedGroupSet = new Set(state.selectedGroups.map((item) => String(item)));
+          getFilteredGroupItems().forEach((item) => selectedGroupSet.add(String(item.value)));
+          setSelectedGroups(Array.from(selectedGroupSet));
+        });
+
+        elements.clearGroups.addEventListener("click", () => {
+          setSelectedGroups([]);
         });
 
         elements.proxy.addEventListener("change", () => {

@@ -155,6 +155,11 @@ function dispatch(element, type) {
   element.listeners[type]({ target: element });
 }
 
+function dispatchWithTarget(element, type, target) {
+  assert.equal(typeof element.listeners[type], "function", `missing ${type} listener on ${element.selector}`);
+  element.listeners[type]({ target });
+}
+
 function jwtWithPayload(payload) {
   return [
     Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url"),
@@ -553,6 +558,47 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
   assert.equal(elements.get("#sub2api-auto-passthrough").checked, true);
 }
 
+function testCustomGroupPickerSelectsVisibleGroupsAndClears() {
+  const { elements } = loadPageScript();
+  const groups = elements.get("#sub2api-groups");
+  groups.options = [
+    { value: "1", textContent: "日卡 50万", selected: false },
+    { value: "2", textContent: "月卡 480万", selected: false },
+    { value: "custom", textContent: "自定义组", selected: false },
+  ];
+
+  elements.get("#sub2api-group-search").value = "日卡";
+  dispatch(elements.get("#sub2api-group-search"), "input");
+  assert.match(elements.get("#sub2api-group-list").innerHTML, /日卡 50万/);
+  assert.doesNotMatch(elements.get("#sub2api-group-list").innerHTML, /月卡 480万/);
+
+  dispatch(elements.get("#select-all-sub2api-groups"), "click");
+  assert.deepEqual(groups.options.map((option) => option.selected), [true, false, false]);
+  assert.match(elements.get("#sub2api-group-summary").innerHTML, /已选 1 个/);
+
+  dispatch(elements.get("#clear-sub2api-groups"), "click");
+  assert.deepEqual(groups.options.map((option) => option.selected), [false, false, false]);
+  assert.match(elements.get("#sub2api-group-summary").innerHTML, /未选择分组/);
+}
+
+function testCustomGroupPickerCheckboxUpdatesHiddenSelect() {
+  const { elements } = loadPageScript();
+  const groups = elements.get("#sub2api-groups");
+  groups.options = [
+    { value: "1", textContent: "默认组", selected: false },
+    { value: "custom", textContent: "自定义组", selected: false },
+  ];
+
+  dispatch(elements.get("#sub2api-group-search"), "input");
+  dispatchWithTarget(elements.get("#sub2api-group-list"), "change", {
+    dataset: { groupId: "custom" },
+    checked: true,
+  });
+
+  assert.deepEqual(groups.options.map((option) => option.selected), [false, true]);
+  assert.match(elements.get("#sub2api-group-summary").innerHTML, /自定义组/);
+}
+
 async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
   const capturedRequests = [];
   const { elements } = loadPageScript({
@@ -949,6 +995,8 @@ async function main() {
   testCodexManagerAuthJsonPreservesRealRefreshAndMetadata();
   testSub2apiTokenVisibilityToggle();
   testSub2apiImportToolsOnlyVisibleForSub2apiFormat();
+  testCustomGroupPickerSelectsVisibleGroupsAndClears();
+  testCustomGroupPickerCheckboxUpdatesHiddenSelect();
   await testServerDefaultSub2apiUrlHydratesInput();
   await testSub2apiUrlShorthandNormalizesToApiEndpoints();
   await testServerProxyModeImportsWithoutBrowserBearer();

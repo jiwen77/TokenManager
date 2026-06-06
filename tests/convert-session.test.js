@@ -63,7 +63,7 @@ function loadPageScript(overrides = {}) {
   const scriptMatch = html.match(/<script\s+src=(["'])(.*?)\1><\/script>/);
   const inlineMatch = html.match(/<script>\s*([\s\S]*?)\s*<\/script>\s*<\/body>/);
   const script = scriptMatch
-    ? fs.readFileSync(path.join(path.dirname(htmlPath), scriptMatch[2]), "utf8")
+    ? fs.readFileSync(path.join(path.dirname(htmlPath), scriptMatch[2].split("?")[0]), "utf8")
     : inlineMatch?.[1];
 
   assert.ok(script, "expected docs/index.html to reference or contain the app script");

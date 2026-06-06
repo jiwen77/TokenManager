@@ -673,11 +673,10 @@ function serveStaticFile(req, res, filePath) {
   }
 
   const contentType = STATIC_CONTENT_TYPES.get(path.extname(filePath).toLowerCase()) || "application/octet-stream";
-  const isHtml = contentType.startsWith("text/html");
   res.writeHead(200, tokenManagerSecurityHeaders({
     "Content-Type": contentType,
     "Content-Length": stat.size,
-    "Cache-Control": isHtml ? "no-store" : "public, max-age=300",
+    "Cache-Control": "no-store",
   }));
   if (req.method === "HEAD") {
     res.end();

@@ -554,8 +554,7 @@
         grid-template-areas:
           "connection"
           "behavior"
-          "binding"
-          "actions";
+          "binding";
         gap: 14px;
         padding: 18px;
         border-color: rgba(36, 80, 90, 0.14);
@@ -968,18 +967,19 @@
       }
 
       .sub2api-actions {
-        grid-area: actions;
-        display: grid;
-        grid-template-columns: auto auto minmax(0, 1fr);
+        display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: 10px;
-        padding-top: 2px;
+        justify-content: flex-end;
+        flex: 0 0 auto;
       }
 
       .sub2api-config-status {
         min-height: 38px;
         display: flex;
         align-items: center;
+        margin-bottom: 12px;
         padding: 8px 11px;
         border: 1px solid rgba(36, 80, 90, 0.12);
         border-radius: 10px;

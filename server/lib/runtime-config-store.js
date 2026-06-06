@@ -37,6 +37,37 @@ function normalizeSub2ApiSelectionIds(value) {
   return normalizeSub2ApiGroupIds(value);
 }
 
+function normalizeSub2ApiMetaOptions(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set();
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        const id = normalizeSub2ApiSelectionId(item);
+        return id === null ? null : { id, name: String(item) };
+      }
+      const id = normalizeSub2ApiSelectionId(item.id ?? item.value ?? item.key ?? item.name);
+      if (id === null) {
+        return null;
+      }
+      return {
+        id,
+        name: String(item.name ?? item.label ?? item.title ?? item.id ?? id),
+      };
+    })
+    .filter(Boolean)
+    .filter((item) => {
+      const key = String(item.id);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
 function normalizeFiniteNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -124,6 +155,16 @@ function sanitizeRuntimeConfig(value = {}, current = {}) {
 
   if (Object.prototype.hasOwnProperty.call(value, "group_ids") || Object.prototype.hasOwnProperty.call(value, "groupIds")) {
     next.groupIds = normalizeSub2ApiGroupIds(value.group_ids ?? value.groupIds);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "group_options") || Object.prototype.hasOwnProperty.call(value, "groupOptions")) {
+    next.groupOptions = normalizeSub2ApiMetaOptions(value.group_options ?? value.groupOptions);
+    next.metaCachedAt = new Date().toISOString();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "proxy_options") || Object.prototype.hasOwnProperty.call(value, "proxyOptions")) {
+    next.proxyOptions = normalizeSub2ApiMetaOptions(value.proxy_options ?? value.proxyOptions);
+    next.metaCachedAt = new Date().toISOString();
   }
 
   if (Object.prototype.hasOwnProperty.call(value, "proxy_ids") || Object.prototype.hasOwnProperty.call(value, "proxyIds")) {
@@ -433,6 +474,7 @@ module.exports = {
   normalizeFiniteNumber,
   normalizeSub2ApiWebsocketMode,
   normalizeSub2ApiGroupIds,
+  normalizeSub2ApiMetaOptions,
   normalizeSub2ApiSelectionIds,
   normalizeSub2ApiOrigin,
   normalizeSub2ApiSelectionId,

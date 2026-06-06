@@ -38,6 +38,7 @@
           downloadOutput: document.querySelector("#download-output"),
           importSub2api: document.querySelector("#import-sub2api"),
           fileInput: document.querySelector("#file-input"),
+          formatInput: document.querySelector("#format-input"),
           formatButtons: Array.from(document.querySelectorAll("[data-format]")),
           input: document.querySelector("#session-input"),
           inputStatus: document.querySelector("#input-status"),
@@ -946,6 +947,23 @@
           }
         }
 
+        function formatInputJson() {
+          const text = elements.input.value;
+          if (!text.trim()) {
+            setStatus(elements.inputStatus, "没有可格式化的 JSON。", "error");
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(text);
+            elements.input.value = JSON.stringify(parsed, null, 2);
+            scheduleConvert();
+            setStatus(elements.inputStatus, "已格式化换行。", "ok");
+          } catch (error) {
+            setStatus(elements.inputStatus, error instanceof Error ? `格式化失败：${error.message}` : "格式化失败：不是有效 JSON。", "error");
+          }
+        }
+
         function downloadOutput() {
           if (!state.outputText) {
             return;
@@ -1160,14 +1178,14 @@
 
         function normalizeMetaItem(item) {
           if (isPlainObject(item)) {
-            const rawId = firstNonEmpty(item.id, item.value, item.key, item.name);
+            const rawId = item.id ?? item.value ?? item.key ?? item.name;
             const normalizedId = normalizeBindingId(rawId);
             if (normalizedId === "") {
               return null;
             }
             return {
               value: normalizedId,
-              label: String(firstNonEmpty(item.name, item.label, item.title, rawId)),
+              label: String(firstNonEmpty(item.name, item.label, item.title) ?? rawId),
             };
           }
 
@@ -1194,6 +1212,13 @@
               seen.add(key);
               return true;
             });
+        }
+
+        function toRuntimeMetaOptions(items) {
+          return normalizeMetaItems(items).map((item) => ({
+            id: item.value,
+            name: item.label,
+          }));
         }
 
         function getGroupItemsFromNativeSelect() {
@@ -1433,6 +1458,12 @@
         }
 
         function hydrateSavedSub2ApiSettings(payload) {
+          if (Array.isArray(payload.group_options) || Array.isArray(payload.groupOptions)) {
+            setNativeGroupOptions(payload.group_options || payload.groupOptions, "未缓存分组数据");
+          }
+          if (Array.isArray(payload.proxy_options) || Array.isArray(payload.proxyOptions)) {
+            setNativeProxyOptions(payload.proxy_options || payload.proxyOptions, "未缓存代理数据");
+          }
           if (Array.isArray(payload.group_ids)) {
             state.selectedGroups = payload.group_ids
               .map((value) => /^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value))
@@ -1565,6 +1596,29 @@
             elements.saveSub2apiConfig.disabled = false;
             elements.saveSub2apiConfig.textContent = originalText;
           }
+        }
+
+        async function saveSub2ApiMetaCache() {
+          if (!canLoadServerDefaults()) {
+            return false;
+          }
+          const response = await fetch("/token-manager/auth/config", {
+            method: "POST",
+            cache: "no-store",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              group_options: toRuntimeMetaOptions(state.availableGroups),
+              proxy_options: toRuntimeMetaOptions(state.availableProxies),
+            }),
+          });
+          const payload = await readJsonResponse(response);
+          if (!response.ok) {
+            throw new Error(getErrorMessageFromResponseBody(payload, `HTTP ${response.status}`));
+          }
+          return true;
         }
 
         async function saveTokenManagerPassword() {
@@ -1808,7 +1862,17 @@
             }
 
             applySavedSub2ApiSelectionsToControls();
-            setStatus(elements.sub2apiConfigStatus, `同步成功：读取 ${getKnownGroupItems().length} 个分组、${getKnownProxyItems().length} 个代理。选择后点击“保存配置”即可持久化。`, "ok");
+            let cacheSaved = false;
+            try {
+              cacheSaved = await saveSub2ApiMetaCache();
+            } catch {
+              cacheSaved = false;
+            }
+            setStatus(
+              elements.sub2apiConfigStatus,
+              `同步成功：读取 ${getKnownGroupItems().length} 个分组、${getKnownProxyItems().length} 个代理。${cacheSaved ? "列表已缓存，下次打开会自动显示。" : "列表已显示；缓存保存失败时可稍后再同步。"}`,
+              "ok",
+            );
           } catch (error) {
             setStatus(elements.sub2apiConfigStatus, `同步失败：${error instanceof Error ? error.message : "无法读取分组/代理。"}`, "error");
           } finally {
@@ -2071,6 +2135,8 @@
           elements.input.value = JSON.stringify(exampleSession, null, 2);
           scheduleConvert();
         });
+
+        elements.formatInput.addEventListener("click", formatInputJson);
 
         updateOutput();
         renderServerAccounts();

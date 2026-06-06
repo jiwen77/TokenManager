@@ -534,7 +534,9 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
           sub2api_default_origin: "https://api.example.com",
           sub2api_api_base_path: "/custom-api",
           group_ids: [1, "custom"],
+          group_options: [{ id: 1, name: "Cached Group" }, { id: "custom", name: "Custom Group" }],
           proxy_ids: [7, "pool-b"],
+          proxy_options: [{ id: 7, name: "Cached Proxy" }, { id: "pool-b", name: "Pool B" }],
           priority: 3,
           rate_multiplier: 1.5,
           websocket_mode: "passthrough",
@@ -557,6 +559,8 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(elements.get("#sub2api-url").value, "https://api.example.com");
+  assert.match(elements.get("#sub2api-group-list").innerHTML, /Cached Group/);
+  assert.match(elements.get("#sub2api-proxy-list").innerHTML, /Cached Proxy/);
   assert.deepEqual(
     elements.get("#sub2api-groups").options.map((option) => option.selected),
     [true, true, false],
@@ -634,6 +638,16 @@ function testCustomProxyPickerSelectsVisibleProxiesAndClears() {
   dispatch(elements.get("#clear-sub2api-proxies"), "click");
   assert.deepEqual(proxies.options.map((option) => option.selected), [false, false, false]);
   assert.match(elements.get("#sub2api-proxy-summary").innerHTML, /未选择代理/);
+}
+
+function testFormatInputJsonAddsLineBreaks() {
+  const { elements } = loadPageScript();
+  elements.get("#session-input").value = '{"user":{"email":"mark@example.com"},"accessToken":"token"}';
+
+  dispatch(elements.get("#format-input"), "click");
+
+  assert.match(elements.get("#session-input").value, /{\n  "user":/);
+  assert.match(elements.get("#input-status").textContent, /已格式化换行/);
 }
 
 async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
@@ -1054,8 +1068,34 @@ async function testUrlTokenDoesNotHydrateBearerOrFetchAccounts() {
 
 async function testFetchSub2ApiMetaUsesSub2apiAllEndpoints() {
   const capturedUrls = [];
+  const capturedPosts = [];
   const { elements } = loadPageScript({
-    fetch: async (url) => {
+    window: {
+      location: {
+        origin: "https://tokenmanager.example.com",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url, options = {}) => {
+      if (url === "/token-manager/auth/config" && options.method === "POST") {
+        capturedPosts.push(JSON.parse(options.body));
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            group_options: [{ id: 1, name: "Default Group" }],
+            proxy_options: [{ id: 2, name: "Default Proxy" }],
+          }),
+        };
+      }
+      if (url === "/token-manager/auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sub2api_api_base_path: "/api/v1" }),
+        };
+      }
       capturedUrls.push(String(url));
       return {
         ok: true,
@@ -1079,9 +1119,11 @@ async function testFetchSub2ApiMetaUsesSub2apiAllEndpoints() {
     "https://sub2api.example.com/api/v1/admin/groups/all",
     "https://sub2api.example.com/api/v1/admin/proxies/all",
   ]);
+  assert.deepEqual(capturedPosts[0].group_options, [{ id: 1, name: "Default Group" }]);
+  assert.deepEqual(capturedPosts[0].proxy_options, [{ id: 2, name: "Default Proxy" }]);
   assert.match(elements.get("#sub2api-groups").innerHTML, /Default Group/);
   assert.match(elements.get("#sub2api-proxy").innerHTML, /Default Proxy/);
-  assert.match(elements.get("#sub2api-config-status").textContent, /同步成功/);
+  assert.match(elements.get("#sub2api-config-status").textContent, /列表已缓存/);
 }
 
 async function main() {
@@ -1100,6 +1142,7 @@ async function main() {
   testCustomGroupPickerSelectsVisibleGroupsAndClears();
   testCustomGroupPickerCheckboxUpdatesHiddenSelect();
   testCustomProxyPickerSelectsVisibleProxiesAndClears();
+  testFormatInputJsonAddsLineBreaks();
   await testServerDefaultSub2apiUrlHydratesInput();
   await testSub2apiUrlShorthandNormalizesToApiEndpoints();
   await testServerProxyModeImportsWithoutBrowserBearer();

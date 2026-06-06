@@ -10,6 +10,7 @@ const {
   RuntimeConfigStore,
   normalizeFiniteNumber,
   normalizeSub2ApiGroupIds,
+  normalizeSub2ApiMetaOptions,
   normalizeSub2ApiSelectionIds,
 } = require("./lib/runtime-config-store");
 
@@ -279,8 +280,11 @@ function buildPublicConfig(config, runtimeConfig = {}) {
     sub2api_has_bearer_token: Boolean(runtimeConfig.sub2apiBearerToken || config.sub2apiAdminBearerToken),
     sub2api_server_auth_configured: Boolean(runtimeConfig.sub2apiBearerToken || config.sub2apiAdminApiKey || config.sub2apiAdminBearerToken || config.sub2apiJwtSecret || config.sub2apiAdminPassword),
     group_ids: normalizeSub2ApiGroupIds(runtimeConfig.groupIds),
+    group_options: normalizeSub2ApiMetaOptions(runtimeConfig.groupOptions),
     proxy_ids: proxyIds,
     proxy_id: proxyIds.length ? proxyIds[0] : null,
+    proxy_options: normalizeSub2ApiMetaOptions(runtimeConfig.proxyOptions),
+    meta_cached_at: runtimeConfig.metaCachedAt,
     priority: normalizeFiniteNumber(runtimeConfig.priority, 1),
     rate_multiplier: normalizeFiniteNumber(runtimeConfig.rateMultiplier, 1),
     websocket_mode: runtimeConfig.websocketMode || "off",

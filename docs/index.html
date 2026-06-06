@@ -95,6 +95,7 @@
             <div class="input-actions">
               <button class="button button-secondary" id="pick-files" type="button">选择文件</button>
               <button class="button button-secondary" id="load-example" type="button">填入示例结构</button>
+              <button class="button button-secondary" id="format-input" type="button">格式化换行</button>
               <button class="button button-ghost" id="clear-input" type="button">清空</button>
             </div>
             <textarea
@@ -162,187 +163,186 @@
       </section>
 
       <section class="panel sub2api-tools" id="sub2api-tools" aria-labelledby="sub2api-tools-title">
-        <div class="panel-head">
+        <div class="panel-head sub2api-panel-head">
           <div>
             <h2 id="sub2api-tools-title">sub2api 导入与服务器数据</h2>
             <p>仅在选择 sub2api 输出格式时可用；这里用于填写 sub2api 地址、Bearer Token、分组与代理，并查看服务器持久化账号。</p>
           </div>
+          <div class="sub2api-actions" aria-label="sub2api 配置操作">
+            <button class="button button-primary" id="save-sub2api-config" type="button">保存配置</button>
+            <button class="button button-secondary" id="fetch-sub2api-meta" type="button">同步分组/代理</button>
+          </div>
         </div>
         <div class="panel-body">
-            <div class="import-config sub2api-config" aria-label="sub2api 导入配置">
-              <section class="config-section is-connection" id="sub2api-browser-config" aria-label="sub2api 连接与认证">
-                <div class="config-section-head">
-                  <div>
-                    <div class="section-title-row">
-                      <span class="step-pill">01</span>
-                      <h3 class="config-section-title">连接与认证</h3>
-                    </div>
-                    <p class="config-section-help">这里只填域名、IP:端口或 base URL；API 路径由 TokenManager 自动补齐。</p>
-                  </div>
-                </div>
-                <div class="import-config-grid">
-                  <div class="config-field">
-                    <label for="sub2api-url">sub2api 服务器地址</label>
-                    <input id="sub2api-url" type="text" placeholder="https://api.example.com 或 127.0.0.1:8080" spellcheck="false" />
-                    <span class="field-help">服务器代理模式下，浏览器不会直接访问这个地址。</span>
-                  </div>
-                  <div class="config-field">
-                    <label for="sub2api-token">Bearer Token</label>
-                    <div class="secret-field">
-                      <input id="sub2api-token" type="password" placeholder="服务器已保存认证；留空不会覆盖" spellcheck="false" autocomplete="off" />
-                      <button class="secret-toggle" id="toggle-sub2api-token" type="button" aria-label="显示 Bearer Token" aria-pressed="false" title="显示 Bearer Token">
-                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                          <path fill="currentColor" d="M12 5c5.5 0 9.7 4.7 10.8 6.2.3.5.3 1.1 0 1.6C21.7 14.3 17.5 19 12 19S2.3 14.3 1.2 12.8a1.4 1.4 0 0 1 0-1.6C2.3 9.7 6.5 5 12 5Zm0 2c-4.3 0-7.8 3.5-8.9 5 1.1 1.5 4.6 5 8.9 5s7.8-3.5 8.9-5C19.8 10.5 16.3 7 12 7Zm0 2.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z" />
-                        </svg>
-                      </button>
-                    </div>
-                    <span class="field-help">保存后不会明文回显；需要更换时重新填写即可。</span>
-                  </div>
-                </div>
-              </section>
-
-              <section class="config-section is-behavior" aria-label="sub2api 导入行为">
-                <div class="config-section-head">
-                  <div>
-                    <div class="section-title-row">
-                      <span class="step-pill">02</span>
-                      <h3 class="config-section-title">导入行为</h3>
-                    </div>
-                    <p class="config-section-help">先设置导入账号默认参数，再选择是否需要绑定分组。</p>
-                  </div>
-                </div>
-                <div class="import-config-grid is-three">
-                  <div class="config-field">
-                    <label for="sub2api-priority">Priority</label>
-                    <input id="sub2api-priority" type="number" value="1" min="0" spellcheck="false" />
-                    <span class="field-help">数值越小通常越优先。</span>
-                  </div>
-                  <div class="config-field">
-                    <label for="sub2api-rate-multiplier">计费倍率</label>
-                    <input id="sub2api-rate-multiplier" type="number" value="1.0" step="0.1" min="0" spellcheck="false" />
-                    <span class="field-help">写入 rate_multiplier。</span>
-                  </div>
-                  <div class="config-field">
-                    <label for="sub2api-websocket-mode">WS mode</label>
-                    <select id="sub2api-websocket-mode">
-                      <option value="off">关闭</option>
-                      <option value="ctx_pool">ctx_pool</option>
-                      <option value="passthrough">passthrough</option>
-                    </select>
-                    <span class="field-help">写入 WebSocket v2 mode。</span>
-                  </div>
-                </div>
-                <div class="import-config-grid is-balanced">
-                  <label class="switch-card" for="sub2api-auto-passthrough">
-                    <input id="sub2api-auto-passthrough" type="checkbox" />
-                    <span>
-                      <span class="switch-card-title">自动透传</span>
-                      <span class="switch-card-help">开启后写入 extra.openai_passthrough，适合让 sub2api 对支持的模型走自动透传分支。</span>
-                    </span>
-                  </label>
-                  <div class="config-hint" id="sub2api-config-hint">服务器代理模式已启用时，保存的配置会持久化在服务器；导入请求由 TokenManager 发起。</div>
-                </div>
-              </section>
-
-              <section class="config-section is-binding" aria-label="sub2api 绑定设置">
-                <div class="config-section-head">
-                  <div>
-                    <div class="section-title-row">
-                      <span class="step-pill">03</span>
-                      <h3 class="config-section-title">绑定分组与代理</h3>
-                    </div>
-                    <p class="config-section-help">分组列表占整行显示，搜索后勾选即可；不用按 Ctrl/Cmd 多选。</p>
-                  </div>
-                </div>
-                <div class="binding-card">
-                  <div class="config-field">
-                    <label for="sub2api-group-search">绑定分组</label>
-                    <select id="sub2api-groups" class="native-group-select" multiple aria-hidden="true" tabindex="-1">
-                      <option value="">(请先同步 sub2api 数据)</option>
-                    </select>
-                    <div class="group-picker" id="sub2api-group-picker">
-                      <div class="group-picker-top">
-                        <div>
-                          <label class="sr-only" for="sub2api-group-search">搜索分组</label>
-                          <input class="group-search-input" id="sub2api-group-search" type="search" placeholder="搜索分组名或 ID" autocomplete="off" spellcheck="false" />
-                        </div>
-                        <div class="group-picker-actions" aria-label="分组快捷操作">
-                          <button class="tiny-button" id="select-all-sub2api-groups" type="button">全选可见</button>
-                          <button class="tiny-button" id="clear-sub2api-groups" type="button">清空</button>
-                        </div>
-                      </div>
-                      <div class="group-summary" id="sub2api-group-summary" aria-live="polite">未选择分组</div>
-                      <div class="group-option-list" id="sub2api-group-list" role="listbox" aria-multiselectable="true">
-                        <div class="group-empty">先点击“同步”，TokenManager 会从 sub2api 读取可用分组。</div>
-                      </div>
-                    </div>
-                    <span class="field-help">不选择分组时，导入账号不额外绑定分组。</span>
-                  </div>
-                  <div class="config-field">
-                    <label for="sub2api-proxy-search">绑定代理</label>
-                    <select id="sub2api-proxy" class="native-group-select" multiple aria-hidden="true" tabindex="-1">
-                      <option value="">不使用代理 / 默认</option>
-                    </select>
-                    <div class="group-picker" id="sub2api-proxy-picker">
-                      <div class="group-picker-top">
-                        <div>
-                          <label class="sr-only" for="sub2api-proxy-search">搜索代理</label>
-                          <input class="group-search-input" id="sub2api-proxy-search" type="search" placeholder="搜索代理名或 ID" autocomplete="off" spellcheck="false" />
-                        </div>
-                        <div class="group-picker-actions" aria-label="代理快捷操作">
-                          <button class="tiny-button" id="select-all-sub2api-proxies" type="button">全选可见</button>
-                          <button class="tiny-button" id="clear-sub2api-proxies" type="button">清空</button>
-                        </div>
-                      </div>
-                      <div class="group-summary" id="sub2api-proxy-summary" aria-live="polite">未选择代理</div>
-                      <div class="group-option-list" id="sub2api-proxy-list" role="listbox" aria-multiselectable="true">
-                        <div class="group-empty">先点击“同步”，TokenManager 会从 sub2api 读取可用代理。</div>
-                      </div>
-                    </div>
-                    <span class="field-help">选择多个代理后，导入时会为每个账号随机分配一个代理；留空使用 sub2api 默认策略。</span>
-                  </div>
-                </div>
-              </section>
-
-              <div class="sub2api-actions">
-                <button class="button button-primary" id="save-sub2api-config" type="button">保存配置</button>
-                <button class="button button-secondary" id="fetch-sub2api-meta" type="button">同步分组/代理</button>
-                <div class="status-line sub2api-config-status" id="sub2api-config-status">填写或确认连接信息后，可以保存配置；需要分组/代理列表时点击“同步分组/代理”。</div>
-              </div>
-            </div>
-            <section class="server-accounts-card" aria-labelledby="server-accounts-title">
-              <div class="server-accounts-head">
+          <div class="status-line sub2api-config-status" id="sub2api-config-status">填写或确认连接信息后，可以保存配置；需要分组/代理列表时点击“同步分组/代理”。</div>
+          <div class="import-config sub2api-config" aria-label="sub2api 导入配置">
+            <section class="config-section is-connection" id="sub2api-browser-config" aria-label="sub2api 连接与认证">
+              <div class="config-section-head">
                 <div>
-                  <h3 class="server-accounts-title" id="server-accounts-title">服务器已保存账号</h3>
-                  <p class="server-accounts-help">数据来自 sub2api/PostgreSQL；刷新页面后仍会保存在服务器。</p>
+                  <div class="section-title-row">
+                    <span class="step-pill">01</span>
+                    <h3 class="config-section-title">连接与认证</h3>
+                  </div>
+                  <p class="config-section-help">这里只填域名、IP:端口或 base URL；API 路径由 TokenManager 自动补齐。</p>
                 </div>
-                <button class="button button-secondary" id="refresh-server-accounts" type="button">刷新服务器账号</button>
               </div>
-              <div class="status-line server-accounts-status" id="server-account-status">填写 Bearer Token 后可刷新服务器账号列表。</div>
-              <div class="accounts server-accounts-table" aria-label="服务器账号列表">
-                <table>
-                  <colgroup>
-                    <col class="col-name" />
-                    <col class="col-email" />
-                    <col class="col-expiry" />
-                    <col class="col-type" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>名称</th>
-                      <th>邮箱</th>
-                      <th>过期时间</th>
-                      <th>状态</th>
-                    </tr>
-                  </thead>
-                  <tbody id="server-account-body">
-                    <tr>
-                      <td colspan="4" class="empty">暂无服务器账号数据。</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div class="import-config-grid">
+                <div class="config-field">
+                  <label for="sub2api-url">sub2api 服务器地址</label>
+                  <input id="sub2api-url" type="text" placeholder="https://api.example.com 或 127.0.0.1:8080" spellcheck="false" />
+                  <span class="field-help">服务器代理模式下，浏览器不会直接访问这个地址。</span>
+                </div>
+                <div class="config-field">
+                  <label for="sub2api-token">Bearer Token</label>
+                  <div class="secret-field">
+                    <input id="sub2api-token" type="password" placeholder="服务器已保存认证；留空不会覆盖" spellcheck="false" autocomplete="off" />
+                    <button class="secret-toggle" id="toggle-sub2api-token" type="button" aria-label="显示 Bearer Token" aria-pressed="false" title="显示 Bearer Token">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path fill="currentColor" d="M12 5c5.5 0 9.7 4.7 10.8 6.2.3.5.3 1.1 0 1.6C21.7 14.3 17.5 19 12 19S2.3 14.3 1.2 12.8a1.4 1.4 0 0 1 0-1.6C2.3 9.7 6.5 5 12 5Zm0 2c-4.3 0-7.8 3.5-8.9 5 1.1 1.5 4.6 5 8.9 5s7.8-3.5 8.9-5C19.8 10.5 16.3 7 12 7Zm0 2.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z" />
+                      </svg>
+                    </button>
+                  </div>
+                  <span class="field-help">保存后不会明文回显；需要更换时重新填写即可。</span>
+                </div>
               </div>
             </section>
+
+            <section class="config-section is-behavior" aria-label="sub2api 导入行为">
+              <div class="config-section-head">
+                <div>
+                  <div class="section-title-row">
+                    <span class="step-pill">02</span>
+                    <h3 class="config-section-title">导入行为</h3>
+                  </div>
+                  <p class="config-section-help">先设置导入账号默认参数，再选择是否需要绑定分组。</p>
+                </div>
+              </div>
+              <div class="import-config-grid is-three">
+                <div class="config-field">
+                  <label for="sub2api-priority">Priority</label>
+                  <input id="sub2api-priority" type="number" value="1" min="0" spellcheck="false" />
+                  <span class="field-help">数值越小通常越优先。</span>
+                </div>
+                <div class="config-field">
+                  <label for="sub2api-rate-multiplier">计费倍率</label>
+                  <input id="sub2api-rate-multiplier" type="number" value="1.0" step="0.1" min="0" spellcheck="false" />
+                  <span class="field-help">写入 rate_multiplier。</span>
+                </div>
+                <div class="config-field">
+                  <label for="sub2api-websocket-mode">WS mode</label>
+                  <select id="sub2api-websocket-mode">
+                    <option value="off">关闭</option>
+                    <option value="ctx_pool">ctx_pool</option>
+                    <option value="passthrough">passthrough</option>
+                  </select>
+                  <span class="field-help">写入 WebSocket v2 mode。</span>
+                </div>
+              </div>
+              <div class="import-config-grid is-balanced">
+                <label class="switch-card" for="sub2api-auto-passthrough">
+                  <input id="sub2api-auto-passthrough" type="checkbox" />
+                  <span>
+                    <span class="switch-card-title">自动透传</span>
+                    <span class="switch-card-help">开启后写入 extra.openai_passthrough，适合让 sub2api 对支持的模型走自动透传分支。</span>
+                  </span>
+                </label>
+                <div class="config-hint" id="sub2api-config-hint">服务器代理模式已启用时，保存的配置会持久化在服务器；导入请求由 TokenManager 发起。</div>
+              </div>
+            </section>
+
+            <section class="config-section is-binding" aria-label="sub2api 绑定设置">
+              <div class="config-section-head">
+                <div>
+                  <div class="section-title-row">
+                    <span class="step-pill">03</span>
+                    <h3 class="config-section-title">绑定分组与代理</h3>
+                  </div>
+                  <p class="config-section-help">分组列表占整行显示，搜索后勾选即可；不用按 Ctrl/Cmd 多选。</p>
+                </div>
+              </div>
+              <div class="binding-card">
+                <div class="config-field">
+                  <label for="sub2api-group-search">绑定分组</label>
+                  <select id="sub2api-groups" class="native-group-select" multiple aria-hidden="true" tabindex="-1">
+                    <option value="">(请先同步 sub2api 数据)</option>
+                  </select>
+                  <div class="group-picker" id="sub2api-group-picker">
+                    <div class="group-picker-top">
+                      <div>
+                        <label class="sr-only" for="sub2api-group-search">搜索分组</label>
+                        <input class="group-search-input" id="sub2api-group-search" type="search" placeholder="搜索分组名或 ID" autocomplete="off" spellcheck="false" />
+                      </div>
+                      <div class="group-picker-actions" aria-label="分组快捷操作">
+                        <button class="tiny-button" id="select-all-sub2api-groups" type="button">全选可见</button>
+                        <button class="tiny-button" id="clear-sub2api-groups" type="button">清空</button>
+                      </div>
+                    </div>
+                    <div class="group-summary" id="sub2api-group-summary" aria-live="polite">未选择分组</div>
+                    <div class="group-option-list" id="sub2api-group-list" role="listbox" aria-multiselectable="true">
+                      <div class="group-empty">先点击“同步”，TokenManager 会从 sub2api 读取可用分组。</div>
+                    </div>
+                  </div>
+                  <span class="field-help">不选择分组时，导入账号不额外绑定分组。</span>
+                </div>
+                <div class="config-field">
+                  <label for="sub2api-proxy-search">绑定代理</label>
+                  <select id="sub2api-proxy" class="native-group-select" multiple aria-hidden="true" tabindex="-1">
+                    <option value="">不使用代理 / 默认</option>
+                  </select>
+                  <div class="group-picker" id="sub2api-proxy-picker">
+                    <div class="group-picker-top">
+                      <div>
+                        <label class="sr-only" for="sub2api-proxy-search">搜索代理</label>
+                        <input class="group-search-input" id="sub2api-proxy-search" type="search" placeholder="搜索代理名或 ID" autocomplete="off" spellcheck="false" />
+                      </div>
+                      <div class="group-picker-actions" aria-label="代理快捷操作">
+                        <button class="tiny-button" id="select-all-sub2api-proxies" type="button">全选可见</button>
+                        <button class="tiny-button" id="clear-sub2api-proxies" type="button">清空</button>
+                      </div>
+                    </div>
+                    <div class="group-summary" id="sub2api-proxy-summary" aria-live="polite">未选择代理</div>
+                    <div class="group-option-list" id="sub2api-proxy-list" role="listbox" aria-multiselectable="true">
+                      <div class="group-empty">先点击“同步”，TokenManager 会从 sub2api 读取可用代理。</div>
+                    </div>
+                  </div>
+                  <span class="field-help">选择多个代理后，导入时会为每个账号随机分配一个代理；留空使用 sub2api 默认策略。</span>
+                </div>
+              </div>
+            </section>
+          </div>
+          <section class="server-accounts-card" aria-labelledby="server-accounts-title">
+            <div class="server-accounts-head">
+              <div>
+                <h3 class="server-accounts-title" id="server-accounts-title">服务器已保存账号</h3>
+                <p class="server-accounts-help">数据来自 sub2api/PostgreSQL；刷新页面后仍会保存在服务器。</p>
+              </div>
+              <button class="button button-secondary" id="refresh-server-accounts" type="button">刷新服务器账号</button>
+            </div>
+            <div class="status-line server-accounts-status" id="server-account-status">填写 Bearer Token 后可刷新服务器账号列表。</div>
+            <div class="accounts server-accounts-table" aria-label="服务器账号列表">
+              <table>
+                <colgroup>
+                  <col class="col-name" />
+                  <col class="col-email" />
+                  <col class="col-expiry" />
+                  <col class="col-type" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>邮箱</th>
+                    <th>过期时间</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody id="server-account-body">
+                  <tr>
+                    <td colspan="4" class="empty">暂无服务器账号数据。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
 
         </div>
       </section>

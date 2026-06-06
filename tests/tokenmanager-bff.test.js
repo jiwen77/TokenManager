@@ -418,7 +418,9 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
         sub2api_import_path: "/api/v1/admin/accounts/data",
         sub2api_bearer_token: "runtime-bearer-token",
         group_ids: [1, "custom"],
+        group_options: [{ id: 1, name: "Default Group" }],
         proxy_ids: [7, "pool-b"],
+        proxy_options: [{ id: 7, name: "Default Proxy" }, { id: "pool-b", name: "Pool B" }],
         priority: 3,
         rate_multiplier: 1.5,
         websocket_mode: "passthrough",
@@ -429,8 +431,10 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(saved.body.sub2api_default_origin, mockOrigin);
     assert.equal(saved.body.sub2api_has_bearer_token, true);
     assert.deepEqual(saved.body.group_ids, [1, "custom"]);
+    assert.deepEqual(saved.body.group_options, [{ id: 1, name: "Default Group" }]);
     assert.deepEqual(saved.body.proxy_ids, [7, "pool-b"]);
     assert.equal(saved.body.proxy_id, 7);
+    assert.deepEqual(saved.body.proxy_options, [{ id: 7, name: "Default Proxy" }, { id: "pool-b", name: "Pool B" }]);
     assert.equal(saved.body.priority, 3);
     assert.equal(saved.body.rate_multiplier, 1.5);
     assert.equal(saved.body.websocket_mode, "passthrough");
@@ -446,8 +450,10 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     const persisted = store.read();
     assert.equal(persisted.sub2apiOrigin, mockOrigin);
     assert.equal(persisted.sub2apiBearerToken, "runtime-bearer-token");
+    assert.deepEqual(persisted.groupOptions, [{ id: 1, name: "Default Group" }]);
     assert.deepEqual(persisted.proxyIds, [7, "pool-b"]);
     assert.equal(persisted.proxyId, 7);
+    assert.deepEqual(persisted.proxyOptions, [{ id: 7, name: "Default Proxy" }, { id: "pool-b", name: "Pool B" }]);
     assert.equal(persisted.websocketMode, "passthrough");
     assert.equal(persisted.autoPassthrough, true);
     const rawDatabase = fs.readFileSync(databaseFile);

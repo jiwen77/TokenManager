@@ -534,7 +534,7 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
           sub2api_default_origin: "https://api.example.com",
           sub2api_api_base_path: "/custom-api",
           group_ids: [1, "custom"],
-          proxy_id: 7,
+          proxy_ids: [7, "pool-b"],
           priority: 3,
           rate_multiplier: 1.5,
           websocket_mode: "passthrough",
@@ -548,6 +548,11 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
     { value: "custom", selected: false },
     { value: "other", selected: false },
   ];
+  elements.get("#sub2api-proxy").options = [
+    { value: "7", selected: false },
+    { value: "pool-b", selected: false },
+    { value: "other", selected: false },
+  ];
 
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -557,6 +562,10 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
     [true, true, false],
   );
   assert.equal(elements.get("#sub2api-proxy").value, "7");
+  assert.deepEqual(
+    elements.get("#sub2api-proxy").options.map((option) => option.selected),
+    [true, true, false],
+  );
   assert.equal(elements.get("#sub2api-priority").value, "3");
   assert.equal(elements.get("#sub2api-rate-multiplier").value, "1.5");
   assert.equal(elements.get("#sub2api-websocket-mode").value, "passthrough");
@@ -602,6 +611,29 @@ function testCustomGroupPickerCheckboxUpdatesHiddenSelect() {
 
   assert.deepEqual(groups.options.map((option) => option.selected), [false, true]);
   assert.match(elements.get("#sub2api-group-summary").innerHTML, /自定义组/);
+}
+
+function testCustomProxyPickerSelectsVisibleProxiesAndClears() {
+  const { elements } = loadPageScript();
+  const proxies = elements.get("#sub2api-proxy");
+  proxies.options = [
+    { value: "1", textContent: "香港代理", selected: false },
+    { value: "2", textContent: "美国代理", selected: false },
+    { value: "custom", textContent: "自定义代理", selected: false },
+  ];
+
+  elements.get("#sub2api-proxy-search").value = "美国";
+  dispatch(elements.get("#sub2api-proxy-search"), "input");
+  assert.match(elements.get("#sub2api-proxy-list").innerHTML, /美国代理/);
+  assert.doesNotMatch(elements.get("#sub2api-proxy-list").innerHTML, /香港代理/);
+
+  dispatch(elements.get("#select-all-sub2api-proxies"), "click");
+  assert.deepEqual(proxies.options.map((option) => option.selected), [false, true, false]);
+  assert.match(elements.get("#sub2api-proxy-summary").innerHTML, /已选 1 个/);
+
+  dispatch(elements.get("#clear-sub2api-proxies"), "click");
+  assert.deepEqual(proxies.options.map((option) => option.selected), [false, false, false]);
+  assert.match(elements.get("#sub2api-proxy-summary").innerHTML, /未选择代理/);
 }
 
 async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
@@ -743,6 +775,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
             sub2api_import_path: "/api/v1/admin/accounts/data",
             sub2api_has_bearer_token: true,
             group_ids: [1, "custom"],
+            proxy_ids: [7, "pool-b"],
             proxy_id: 7,
             priority: 3,
             rate_multiplier: 1.5,
@@ -772,7 +805,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   elements.get("#sub2api-token").value = "Bearer runtime-token";
   elements.get("#sub2api-groups").selectedOptions = [{ value: "1" }, { value: "custom" }];
   dispatch(elements.get("#sub2api-groups"), "change");
-  elements.get("#sub2api-proxy").value = "7";
+  elements.get("#sub2api-proxy").selectedOptions = [{ value: "7" }, { value: "pool-b" }];
   dispatch(elements.get("#sub2api-proxy"), "change");
   elements.get("#sub2api-priority").value = "3";
   dispatch(elements.get("#sub2api-priority"), "input");
@@ -790,6 +823,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   assert.equal(capturedPosts[0].sub2api_default_origin, "https://remote.example.com");
   assert.equal(capturedPosts[0].sub2api_bearer_token, "Bearer runtime-token");
   assert.deepEqual(capturedPosts[0].group_ids, [1, "custom"]);
+  assert.deepEqual(capturedPosts[0].proxy_ids, [7, "pool-b"]);
   assert.equal(capturedPosts[0].proxy_id, 7);
   assert.equal(capturedPosts[0].priority, 3);
   assert.equal(capturedPosts[0].rate_multiplier, 1.5);
@@ -883,6 +917,68 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
   assert.ok(
     capturedRequests.some((request) => String(request.url).startsWith("https://sub2api.example.com/api/v1/admin/accounts?")),
     "successful import should refresh persisted server accounts"
+  );
+}
+
+async function testImportToSub2ApiRandomlyAssignsSelectedProxies() {
+  const capturedRequests = [];
+  const deterministicMath = Object.create(Math);
+  const randomValues = [0.1, 0.9, 0.1, 0.9];
+  deterministicMath.random = () => randomValues.shift() ?? 0;
+  const { elements } = loadPageScript({
+    Math: deterministicMath,
+    fetch: async (url, options) => {
+      capturedRequests.push({ url, options });
+      if (String(url).includes("/admin/accounts?")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { items: [], total: 0 } }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          data: {
+            account_created: 2,
+            account_failed: 0,
+            proxy_created: 0,
+            proxy_reused: 0,
+          },
+        }),
+      };
+    },
+  });
+
+  const lateAccessToken = jwtWithPayload({
+    exp: 1780473960,
+    "https://api.openai.com/auth": { chatgpt_account_id: "chatgpt-account-late" },
+  });
+  const earlyAccessToken = jwtWithPayload({
+    exp: 1780000000,
+    "https://api.openai.com/auth": { chatgpt_account_id: "chatgpt-account-early" },
+  });
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+  elements.get("#sub2api-proxy").selectedOptions = [{ value: "101" }, { value: "202" }];
+  dispatch(elements.get("#sub2api-proxy"), "change");
+  elements.get("#session-input").value = JSON.stringify([
+    { user: { email: "late@example.com" }, accessToken: lateAccessToken },
+    { user: { email: "early@example.com" }, accessToken: earlyAccessToken },
+  ]);
+  dispatch(elements.get("#session-input"), "input");
+  dispatch(elements.get("#import-sub2api"), "click");
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const capturedRequest = capturedRequests.find((request) => request.options?.method === "POST");
+  assert.ok(capturedRequest, "expected import fetch to be called");
+  const body = JSON.parse(capturedRequest.options.body);
+  assert.deepEqual(
+    body.data.accounts.map((account) => account.proxy_id),
+    [101, 202],
   );
 }
 
@@ -1002,11 +1098,13 @@ async function main() {
   testSub2apiImportToolsOnlyVisibleForSub2apiFormat();
   testCustomGroupPickerSelectsVisibleGroupsAndClears();
   testCustomGroupPickerCheckboxUpdatesHiddenSelect();
+  testCustomProxyPickerSelectsVisibleProxiesAndClears();
   await testServerDefaultSub2apiUrlHydratesInput();
   await testSub2apiUrlShorthandNormalizesToApiEndpoints();
   await testServerProxyModeImportsWithoutBrowserBearer();
   await testSaveSub2apiConfigPostsServerSettings();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
+  await testImportToSub2ApiRandomlyAssignsSelectedProxies();
   await testRefreshServerAccountsFetchesPersistedAccounts();
   await testUrlTokenDoesNotHydrateBearerOrFetchAccounts();
   await testFetchSub2ApiMetaUsesSub2apiAllEndpoints();

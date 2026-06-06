@@ -20,9 +20,11 @@
           serverAccounts: [],
           serverAccountTotal: 0,
           availableGroups: [],
+          availableProxies: [],
           groupSearch: "",
+          proxySearch: "",
           selectedGroups: [],
-          selectedProxy: null,
+          selectedProxies: [],
           sub2apiProxyEnabled: false,
           websocketMode: "off",
           autoPassthrough: false
@@ -46,7 +48,6 @@
           outputSubtitle: document.querySelector("#output-subtitle"),
           pickFiles: document.querySelector("#pick-files"),
           refreshServerAccounts: document.querySelector("#refresh-server-accounts"),
-          refreshServerAccountsInline: document.querySelector("#refresh-server-accounts-inline"),
           serverAccountBody: document.querySelector("#server-account-body"),
           saveSub2apiConfig: document.querySelector("#save-sub2api-config"),
           saveTokenmanagerPassword: document.querySelector("#save-tokenmanager-password"),
@@ -69,6 +70,11 @@
           selectAllGroups: document.querySelector("#select-all-sub2api-groups"),
           clearGroups: document.querySelector("#clear-sub2api-groups"),
           proxy: document.querySelector("#sub2api-proxy"),
+          proxySearch: document.querySelector("#sub2api-proxy-search"),
+          proxySummary: document.querySelector("#sub2api-proxy-summary"),
+          proxyList: document.querySelector("#sub2api-proxy-list"),
+          selectAllProxies: document.querySelector("#select-all-sub2api-proxies"),
+          clearProxies: document.querySelector("#clear-sub2api-proxies"),
           priority: document.querySelector("#sub2api-priority"),
           rateMultiplier: document.querySelector("#sub2api-rate-multiplier"),
           websocketMode: document.querySelector("#sub2api-websocket-mode"),
@@ -608,7 +614,6 @@
             priority: state.priority,
             rate_multiplier: state.rateMultiplier,
             group_ids: state.selectedGroups.length ? state.selectedGroups : undefined,
-            proxy_id: state.selectedProxy || undefined,
             credentials: {
               access_token: accessToken,
               chatgpt_account_id: accountId,
@@ -714,11 +719,31 @@
           };
         }
 
+        function getRandomSelectedProxyId() {
+          if (!state.selectedProxies.length) {
+            return undefined;
+          }
+          const index = Math.floor(Math.random() * state.selectedProxies.length);
+          return state.selectedProxies[Math.min(index, state.selectedProxies.length - 1)];
+        }
+
+        function assignRandomProxy(account) {
+          const proxyId = getRandomSelectedProxyId();
+          if (proxyId === undefined || proxyId === null || proxyId === "") {
+            const { proxy_id: _proxyId, ...withoutProxy } = account;
+            return withoutProxy;
+          }
+          return {
+            ...account,
+            proxy_id: proxyId,
+          };
+        }
+
         function buildSub2apiDocument(converted, now = new Date()) {
           return {
             exported_at: normalizeTimestamp(now),
             proxies: [],
-            accounts: converted.map((item) => item.sub2apiAccount),
+            accounts: converted.map((item) => assignRandomProxy(item.sub2apiAccount)),
           };
         }
 
@@ -1191,6 +1216,29 @@
             : `<option value="">${escapeHtml(emptyText)}</option>`;
         }
 
+        function getProxyItemsFromNativeSelect() {
+          return Array.from(elements.proxy.options || [])
+            .map((option) => normalizeMetaItem({
+              id: option.value,
+              name: option.textContent || option.label || option.value,
+            }))
+            .filter(Boolean);
+        }
+
+        function getKnownProxyItems() {
+          return state.availableProxies.length ? state.availableProxies : getProxyItemsFromNativeSelect();
+        }
+
+        function setNativeProxyOptions(items, emptyText = "暂无可用代理") {
+          const normalizedItems = normalizeMetaItems(items);
+          state.availableProxies = normalizedItems;
+          elements.proxy.innerHTML = normalizedItems.length
+            ? normalizedItems
+              .map((item) => `<option value="${escapeHtml(String(item.value))}">${escapeHtml(item.label)}</option>`)
+              .join("")
+            : `<option value="">${escapeHtml(emptyText)}</option>`;
+        }
+
         function syncHiddenGroupSelectFromState() {
           const selectedGroupSet = new Set(state.selectedGroups.map((item) => String(item)));
           Array.from(elements.groups.options || []).forEach((option) => {
@@ -1198,10 +1246,24 @@
           });
         }
 
+        function syncHiddenProxySelectFromState() {
+          const selectedProxySet = new Set(state.selectedProxies.map((item) => String(item)));
+          Array.from(elements.proxy.options || []).forEach((option) => {
+            option.selected = selectedProxySet.has(String(option.value));
+          });
+          elements.proxy.value = state.selectedProxies.length ? String(state.selectedProxies[0]) : "";
+        }
+
         function getGroupLabel(value) {
           const key = String(value);
           const fromKnown = getKnownGroupItems().find((item) => String(item.value) === key);
           return fromKnown?.label || `分组 ${key}`;
+        }
+
+        function getProxyLabel(value) {
+          const key = String(value);
+          const fromKnown = getKnownProxyItems().find((item) => String(item.value) === key);
+          return fromKnown?.label || `代理 ${key}`;
         }
 
         function setSelectedGroups(nextGroups, options = {}) {
@@ -1224,9 +1286,41 @@
           }
         }
 
+        function setSelectedProxies(nextProxies, options = {}) {
+          const seen = new Set();
+          state.selectedProxies = (Array.isArray(nextProxies) ? nextProxies : [])
+            .map(normalizeBindingId)
+            .filter((value) => value !== "")
+            .filter((value) => {
+              const key = String(value);
+              if (seen.has(key)) {
+                return false;
+              }
+              seen.add(key);
+              return true;
+            });
+          syncHiddenProxySelectFromState();
+          renderProxyPicker();
+          if (options.schedule !== false) {
+            scheduleConvert();
+          }
+        }
+
         function getFilteredGroupItems() {
           const keyword = String(state.groupSearch || "").trim().toLowerCase();
           const items = getKnownGroupItems();
+          if (!keyword) {
+            return items;
+          }
+          return items.filter((item) => {
+            const haystack = `${item.label} ${item.value}`.toLowerCase();
+            return haystack.includes(keyword);
+          });
+        }
+
+        function getFilteredProxyItems() {
+          const keyword = String(state.proxySearch || "").trim().toLowerCase();
+          const items = getKnownProxyItems();
           if (!keyword) {
             return items;
           }
@@ -1247,6 +1341,21 @@
           elements.groupSummary.innerHTML = [
             `<span class="group-chip">已选 ${state.selectedGroups.length} 个</span>`,
             ...visible.map((value) => `<span class="group-chip" title="${escapeHtml(getGroupLabel(value))}">${escapeHtml(getGroupLabel(value))}</span>`),
+            hiddenCount > 0 ? `<span class="group-chip is-muted">+${hiddenCount}</span>` : "",
+          ].filter(Boolean).join("");
+        }
+
+        function renderProxySummary() {
+          if (!state.selectedProxies.length) {
+            elements.proxySummary.innerHTML = '<span class="group-chip is-muted">未选择代理</span>';
+            return;
+          }
+
+          const visible = state.selectedProxies.slice(0, 5);
+          const hiddenCount = state.selectedProxies.length - visible.length;
+          elements.proxySummary.innerHTML = [
+            `<span class="group-chip">已选 ${state.selectedProxies.length} 个</span>`,
+            ...visible.map((value) => `<span class="group-chip" title="${escapeHtml(getProxyLabel(value))}">${escapeHtml(getProxyLabel(value))}</span>`),
             hiddenCount > 0 ? `<span class="group-chip is-muted">+${hiddenCount}</span>` : "",
           ].filter(Boolean).join("");
         }
@@ -1282,10 +1391,42 @@
           }).join("");
         }
 
+        function renderProxyPicker() {
+          renderProxySummary();
+          const items = getFilteredProxyItems();
+          const selectedProxySet = new Set(state.selectedProxies.map((item) => String(item)));
+          const allItems = getKnownProxyItems();
+
+          if (!allItems.length) {
+            elements.proxyList.innerHTML = '<div class="group-empty">先点击“同步”，TokenManager 会从 sub2api 读取可用代理。</div>';
+            return;
+          }
+
+          if (!items.length) {
+            elements.proxyList.innerHTML = '<div class="group-empty">没有匹配的代理；换个关键词试试。</div>';
+            return;
+          }
+
+          elements.proxyList.innerHTML = items.map((item) => {
+            const value = String(item.value);
+            const selected = selectedProxySet.has(value);
+            return `
+              <label class="group-option${selected ? " is-selected" : ""}" data-proxy-id="${escapeHtml(value)}" role="option" aria-selected="${selected}">
+                <input type="checkbox" data-proxy-id="${escapeHtml(value)}" ${selected ? "checked" : ""} />
+                <span>
+                  <span class="group-option-name">${escapeHtml(item.label)}</span>
+                  <span class="group-option-id">ID: ${escapeHtml(value)}</span>
+                </span>
+              </label>
+            `;
+          }).join("");
+        }
+
         function applySavedSub2ApiSelectionsToControls() {
           syncHiddenGroupSelectFromState();
+          syncHiddenProxySelectFromState();
           renderGroupPicker();
-          elements.proxy.value = state.selectedProxy === null || state.selectedProxy === undefined ? "" : String(state.selectedProxy);
+          renderProxyPicker();
         }
 
         function hydrateSavedSub2ApiSettings(payload) {
@@ -1294,9 +1435,13 @@
               .map((value) => /^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value))
               .filter((value) => value !== "");
           }
-          if (Object.prototype.hasOwnProperty.call(payload, "proxy_id")) {
+          if (Array.isArray(payload.proxy_ids)) {
+            setSelectedProxies(payload.proxy_ids
+              .map((value) => /^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value))
+              .filter((value) => value !== ""), { schedule: false });
+          } else if (Object.prototype.hasOwnProperty.call(payload, "proxy_id")) {
             const value = payload.proxy_id;
-            state.selectedProxy = value === null || value === undefined || value === "" ? null : (/^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value));
+            setSelectedProxies(value === null || value === undefined || value === "" ? [] : [/^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value)], { schedule: false });
           }
           if (Number.isFinite(Number(payload.priority))) {
             state.priority = Number(payload.priority);
@@ -1395,7 +1540,8 @@
                 sub2api_import_path: sub2apiBrowserConfig.importPath,
                 sub2api_bearer_token: elements.sub2apiToken.value.trim(),
                 group_ids: state.selectedGroups,
-                proxy_id: state.selectedProxy,
+                proxy_ids: state.selectedProxies,
+                proxy_id: state.selectedProxies.length ? state.selectedProxies[0] : null,
                 priority: state.priority,
                 rate_multiplier: state.rateMultiplier,
                 websocket_mode: state.websocketMode,
@@ -1650,12 +1796,10 @@
             }
 
             if (proxiesRes) {
-              const proxies = unwrapApiData(proxiesRes);
-              if (Array.isArray(proxies)) {
-                elements.proxy.innerHTML = '<option value="">不使用代理 / 默认</option>' + proxies.map(p => `<option value="${p.id}">${escapeHtml(p.name || p.id)}</option>`).join("");
-              }
+              const proxies = normalizeMetaItems(unwrapApiData(proxiesRes));
+              setNativeProxyOptions(proxies, "未获取到可用代理数据");
             } else {
-              elements.proxy.innerHTML = '<option value="">未获取到可用代理数据</option>';
+              setNativeProxyOptions([], "未获取到可用代理数据");
             }
 
             applySavedSub2ApiSelectionsToControls();
@@ -1849,9 +1993,41 @@
         });
 
         elements.proxy.addEventListener("change", () => {
-          const val = elements.proxy.value;
-          state.selectedProxy = val === "" ? null : (/^\d+$/.test(val) ? parseInt(val, 10) : val);
-          scheduleConvert();
+          const selectedOptions = Array.from(elements.proxy.selectedOptions || [])
+            .map(o => o.value)
+            .filter(v => v !== "");
+          const fallbackValue = selectedOptions.length ? [] : [elements.proxy.value].filter(Boolean);
+          setSelectedProxies(selectedOptions.length ? selectedOptions : fallbackValue);
+        });
+
+        elements.proxySearch.addEventListener("input", () => {
+          state.proxySearch = elements.proxySearch.value;
+          renderProxyPicker();
+        });
+
+        elements.proxyList.addEventListener("change", (event) => {
+          const proxyId = event.target?.dataset?.proxyId;
+          if (!proxyId) {
+            return;
+          }
+          const normalizedId = normalizeBindingId(proxyId);
+          const selectedProxySet = new Set(state.selectedProxies.map((item) => String(item)));
+          if (event.target.checked) {
+            selectedProxySet.add(String(normalizedId));
+          } else {
+            selectedProxySet.delete(String(normalizedId));
+          }
+          setSelectedProxies(Array.from(selectedProxySet));
+        });
+
+        elements.selectAllProxies.addEventListener("click", () => {
+          const selectedProxySet = new Set(state.selectedProxies.map((item) => String(item)));
+          getFilteredProxyItems().forEach((item) => selectedProxySet.add(String(item.value)));
+          setSelectedProxies(Array.from(selectedProxySet));
+        });
+
+        elements.clearProxies.addEventListener("click", () => {
+          setSelectedProxies([]);
         });
 
         elements.sub2apiUrl.addEventListener("input", () => {
@@ -1860,7 +2036,6 @@
 
         elements.fetchSub2apiMeta.addEventListener("click", fetchSub2ApiMeta);
         elements.refreshServerAccounts.addEventListener("click", refreshServerAccounts);
-        elements.refreshServerAccountsInline.addEventListener("click", refreshServerAccounts);
         elements.saveSub2apiConfig.addEventListener("click", saveSub2ApiConfig);
         elements.saveTokenmanagerPassword.addEventListener("click", saveTokenManagerPassword);
         elements.sub2apiTokenToggle.addEventListener("click", () => {

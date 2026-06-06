@@ -10,6 +10,7 @@ const {
   RuntimeConfigStore,
   normalizeFiniteNumber,
   normalizeSub2ApiGroupIds,
+  normalizeSub2ApiSelectionIds,
 } = require("./lib/runtime-config-store");
 
 const DEFAULT_SUB2API_BASE_URL = "http://127.0.0.1:8080/api/v1";
@@ -263,6 +264,11 @@ function buildPublicConfig(config, runtimeConfig = {}) {
   const importPath = runtimeConfig.sub2apiImportPath || defaults.importPath || "/api/v1/admin/accounts/data";
   const origin = runtimeConfig.sub2apiOrigin || defaults.origin || "";
   const adminBasePath = getAdminBasePathFromImportPath(importPath);
+  const proxyIds = Array.isArray(runtimeConfig.proxyIds)
+    ? normalizeSub2ApiSelectionIds(runtimeConfig.proxyIds)
+    : runtimeConfig.proxyId === null || runtimeConfig.proxyId === undefined
+      ? []
+      : normalizeSub2ApiSelectionIds([runtimeConfig.proxyId]);
   return {
     sub2api_proxy_enabled: !config.authOnly,
     sub2api_default_origin: origin,
@@ -273,7 +279,8 @@ function buildPublicConfig(config, runtimeConfig = {}) {
     sub2api_has_bearer_token: Boolean(runtimeConfig.sub2apiBearerToken || config.sub2apiAdminBearerToken),
     sub2api_server_auth_configured: Boolean(runtimeConfig.sub2apiBearerToken || config.sub2apiAdminApiKey || config.sub2apiAdminBearerToken || config.sub2apiJwtSecret || config.sub2apiAdminPassword),
     group_ids: normalizeSub2ApiGroupIds(runtimeConfig.groupIds),
-    proxy_id: runtimeConfig.proxyId ?? null,
+    proxy_ids: proxyIds,
+    proxy_id: proxyIds.length ? proxyIds[0] : null,
     priority: normalizeFiniteNumber(runtimeConfig.priority, 1),
     rate_multiplier: normalizeFiniteNumber(runtimeConfig.rateMultiplier, 1),
     websocket_mode: runtimeConfig.websocketMode || "off",

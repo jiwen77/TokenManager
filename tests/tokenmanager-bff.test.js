@@ -418,7 +418,7 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
         sub2api_import_path: "/api/v1/admin/accounts/data",
         sub2api_bearer_token: "runtime-bearer-token",
         group_ids: [1, "custom"],
-        proxy_id: 7,
+        proxy_ids: [7, "pool-b"],
         priority: 3,
         rate_multiplier: 1.5,
         websocket_mode: "passthrough",
@@ -429,6 +429,7 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(saved.body.sub2api_default_origin, mockOrigin);
     assert.equal(saved.body.sub2api_has_bearer_token, true);
     assert.deepEqual(saved.body.group_ids, [1, "custom"]);
+    assert.deepEqual(saved.body.proxy_ids, [7, "pool-b"]);
     assert.equal(saved.body.proxy_id, 7);
     assert.equal(saved.body.priority, 3);
     assert.equal(saved.body.rate_multiplier, 1.5);
@@ -445,6 +446,8 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     const persisted = store.read();
     assert.equal(persisted.sub2apiOrigin, mockOrigin);
     assert.equal(persisted.sub2apiBearerToken, "runtime-bearer-token");
+    assert.deepEqual(persisted.proxyIds, [7, "pool-b"]);
+    assert.equal(persisted.proxyId, 7);
     assert.equal(persisted.websocketMode, "passthrough");
     assert.equal(persisted.autoPassthrough, true);
     const rawDatabase = fs.readFileSync(databaseFile);
@@ -473,7 +476,7 @@ test("sqlite runtime config migrates legacy JSON and encrypts bearer token", () 
     sub2apiImportPath: "/api/v1/admin/accounts/data",
     sub2apiBearerToken: "legacy-secret-token",
     groupIds: [1, "custom"],
-    proxyId: 7,
+    proxyIds: [7, "pool-b"],
     priority: 3,
     rateMultiplier: 1.5,
     websocketMode: "ctx_pool",
@@ -492,6 +495,7 @@ test("sqlite runtime config migrates legacy JSON and encrypts bearer token", () 
   assert.equal(migrated.sub2apiOrigin, "http://127.0.0.1:8080");
   assert.equal(migrated.sub2apiBearerToken, "legacy-secret-token");
   assert.deepEqual(migrated.groupIds, [1, "custom"]);
+  assert.deepEqual(migrated.proxyIds, [7, "pool-b"]);
   assert.equal(migrated.proxyId, 7);
   assert.equal(migrated.priority, 3);
   assert.equal(migrated.rateMultiplier, 1.5);

@@ -280,18 +280,33 @@
                     <span class="field-help">不选择分组时，导入账号不额外绑定分组。</span>
                   </div>
                   <div class="config-field">
-                    <label for="sub2api-proxy">绑定代理</label>
-                    <select id="sub2api-proxy">
+                    <label for="sub2api-proxy-search">绑定代理</label>
+                    <select id="sub2api-proxy" class="native-group-select" multiple aria-hidden="true" tabindex="-1">
                       <option value="">不使用代理 / 默认</option>
                     </select>
-                    <span class="field-help">只绑定一个代理；留空则使用 sub2api 默认策略。</span>
+                    <div class="group-picker" id="sub2api-proxy-picker">
+                      <div class="group-picker-top">
+                        <div>
+                          <label class="sr-only" for="sub2api-proxy-search">搜索代理</label>
+                          <input class="group-search-input" id="sub2api-proxy-search" type="search" placeholder="搜索代理名或 ID" autocomplete="off" spellcheck="false" />
+                        </div>
+                        <div class="group-picker-actions" aria-label="代理快捷操作">
+                          <button class="tiny-button" id="select-all-sub2api-proxies" type="button">全选可见</button>
+                          <button class="tiny-button" id="clear-sub2api-proxies" type="button">清空</button>
+                        </div>
+                      </div>
+                      <div class="group-summary" id="sub2api-proxy-summary" aria-live="polite">未选择代理</div>
+                      <div class="group-option-list" id="sub2api-proxy-list" role="listbox" aria-multiselectable="true">
+                        <div class="group-empty">先点击“同步”，TokenManager 会从 sub2api 读取可用代理。</div>
+                      </div>
+                    </div>
+                    <span class="field-help">选择多个代理后，导入时会为每个账号随机分配一个代理；留空使用 sub2api 默认策略。</span>
                   </div>
                 </div>
               </section>
 
               <div class="sub2api-actions">
                 <button class="button button-primary" id="save-sub2api-config" type="button">保存配置</button>
-                <button class="button button-secondary" id="refresh-server-accounts-inline" type="button">刷新服务器账号</button>
               </div>
             </div>
             <section class="server-accounts-card" aria-labelledby="server-accounts-title">

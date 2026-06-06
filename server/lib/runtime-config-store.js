@@ -33,6 +33,10 @@ function normalizeSub2ApiGroupIds(value) {
     .filter((item) => item !== null);
 }
 
+function normalizeSub2ApiSelectionIds(value) {
+  return normalizeSub2ApiGroupIds(value);
+}
+
 function normalizeFiniteNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -122,8 +126,12 @@ function sanitizeRuntimeConfig(value = {}, current = {}) {
     next.groupIds = normalizeSub2ApiGroupIds(value.group_ids ?? value.groupIds);
   }
 
-  if (Object.prototype.hasOwnProperty.call(value, "proxy_id") || Object.prototype.hasOwnProperty.call(value, "proxyId")) {
+  if (Object.prototype.hasOwnProperty.call(value, "proxy_ids") || Object.prototype.hasOwnProperty.call(value, "proxyIds")) {
+    next.proxyIds = normalizeSub2ApiSelectionIds(value.proxy_ids ?? value.proxyIds);
+    next.proxyId = next.proxyIds.length ? next.proxyIds[0] : null;
+  } else if (Object.prototype.hasOwnProperty.call(value, "proxy_id") || Object.prototype.hasOwnProperty.call(value, "proxyId")) {
     next.proxyId = normalizeSub2ApiSelectionId(value.proxy_id ?? value.proxyId);
+    next.proxyIds = next.proxyId === null ? [] : [next.proxyId];
   }
 
   if (Object.prototype.hasOwnProperty.call(value, "priority")) {
@@ -425,6 +433,7 @@ module.exports = {
   normalizeFiniteNumber,
   normalizeSub2ApiWebsocketMode,
   normalizeSub2ApiGroupIds,
+  normalizeSub2ApiSelectionIds,
   normalizeSub2ApiOrigin,
   normalizeSub2ApiSelectionId,
   sanitizeRuntimeConfig,

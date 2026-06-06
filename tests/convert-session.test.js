@@ -830,7 +830,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   assert.equal(capturedPosts[0].websocket_mode, "ctx_pool");
   assert.equal(capturedPosts[0].auto_passthrough, true);
   assert.equal(elements.get("#sub2api-token").value, "");
-  assert.match(elements.get("#output-status").textContent, /配置已保存到服务器/);
+  assert.match(elements.get("#sub2api-config-status").textContent, /保存成功/);
 }
 
 async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
@@ -1081,6 +1081,7 @@ async function testFetchSub2ApiMetaUsesSub2apiAllEndpoints() {
   ]);
   assert.match(elements.get("#sub2api-groups").innerHTML, /Default Group/);
   assert.match(elements.get("#sub2api-proxy").innerHTML, /Default Proxy/);
+  assert.match(elements.get("#sub2api-config-status").textContent, /同步成功/);
 }
 
 async function main() {

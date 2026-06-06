@@ -969,11 +969,21 @@
 
       .sub2api-actions {
         grid-area: actions;
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: auto auto minmax(0, 1fr);
+        align-items: center;
         gap: 10px;
-        justify-content: flex-start;
         padding-top: 2px;
+      }
+
+      .sub2api-config-status {
+        min-height: 38px;
+        display: flex;
+        align-items: center;
+        padding: 8px 11px;
+        border: 1px solid rgba(36, 80, 90, 0.12);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.72);
       }
 
       .sr-only {

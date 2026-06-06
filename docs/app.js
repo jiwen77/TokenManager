@@ -54,6 +54,7 @@
           serverAccountStatus: document.querySelector("#server-account-status"),
           sub2apiBrowserConfig: document.querySelector("#sub2api-browser-config"),
           sub2apiConfigHint: document.querySelector("#sub2api-config-hint"),
+          sub2apiConfigStatus: document.querySelector("#sub2api-config-status"),
           sub2apiToken: document.querySelector("#sub2api-token"),
           sub2apiTokenToggle: document.querySelector("#toggle-sub2api-token"),
           sub2apiTools: document.querySelector("#sub2api-tools"),
@@ -1142,8 +1143,10 @@
           elements.sub2apiBrowserConfig.hidden = false;
           if (state.sub2apiProxyEnabled) {
             elements.sub2apiConfigHint.textContent = "服务器代理模式已启用：这里填写/保存的 sub2api 地址、Bearer Token、分组和代理会保存在服务器；导入请求由 TokenManager BFF 发起，浏览器不会直接访问 sub2api。";
+            setStatus(elements.sub2apiConfigStatus, "已连接 TokenManager 服务端。可直接保存配置，或点击“同步分组/代理”读取 sub2api 元数据。", "ok");
           } else {
             elements.sub2apiConfigHint.textContent = "浏览器直连模式：这里的地址和 Bearer Token 只在当前页面请求 sub2api 时使用；如需跨设备持久化，请部署并登录 BFF。";
+            setStatus(elements.sub2apiConfigStatus, "浏览器直连模式需要填写 sub2api 地址和 Bearer Token 后，才能同步分组/代理。");
           }
         }
 
@@ -1519,13 +1522,14 @@
 
         async function saveSub2ApiConfig() {
           if (!canLoadServerDefaults()) {
-            setStatus(elements.outputStatus, "本地静态页面无法保存服务器配置。", "error");
+            setStatus(elements.sub2apiConfigStatus, "本地静态页面无法保存服务器配置；请通过 TokenManager 服务端页面访问。", "error");
             return;
           }
 
           elements.saveSub2apiConfig.disabled = true;
           const originalText = elements.saveSub2apiConfig.textContent;
           elements.saveSub2apiConfig.textContent = "保存中...";
+          setStatus(elements.sub2apiConfigStatus, "正在保存 sub2api 地址、认证、分组、代理和导入参数...", "ok");
 
           try {
             const response = await fetch("/token-manager/auth/config", {
@@ -1554,9 +1558,9 @@
             }
             hydrateSub2ApiBrowserConfig(payload || {});
             elements.sub2apiToken.value = "";
-            setStatus(elements.outputStatus, "配置已保存到服务器。", "ok");
+            setStatus(elements.sub2apiConfigStatus, "保存成功：配置已写入服务器，下次打开页面会自动加载。", "ok");
           } catch (error) {
-            setStatus(elements.outputStatus, error instanceof Error ? error.message : "保存配置失败。", "error");
+            setStatus(elements.sub2apiConfigStatus, error instanceof Error ? `保存失败：${error.message}` : "保存配置失败。", "error");
           } finally {
             elements.saveSub2apiConfig.disabled = false;
             elements.saveSub2apiConfig.textContent = originalText;
@@ -1773,13 +1777,14 @@
         async function fetchSub2ApiMeta() {
           const bearerToken = getSub2ApiBearerToken();
           if (!state.sub2apiProxyEnabled && !bearerToken) {
-            setStatus(elements.outputStatus, "请先填写 sub2api 服务器地址和 Bearer Token 以获取配置数据。", "error");
+            setStatus(elements.sub2apiConfigStatus, "同步失败：浏览器直连模式需要先填写 sub2api 地址和 Bearer Token。", "error");
             return;
           }
 
           elements.fetchSub2apiMeta.disabled = true;
           const originalText = elements.fetchSub2apiMeta.textContent;
-          elements.fetchSub2apiMeta.textContent = "同步数据中...";
+          elements.fetchSub2apiMeta.textContent = "同步中...";
+          setStatus(elements.sub2apiConfigStatus, "正在从 sub2api 同步分组和代理列表...", "ok");
 
           try {
             // 分别向后端拉取 groups (分组) 与 proxies (代理)
@@ -1803,9 +1808,9 @@
             }
 
             applySavedSub2ApiSelectionsToControls();
-            setStatus(elements.outputStatus, "成功获取分组合代理元数据，可进行配置绑定。", "ok");
+            setStatus(elements.sub2apiConfigStatus, `同步成功：读取 ${getKnownGroupItems().length} 个分组、${getKnownProxyItems().length} 个代理。选择后点击“保存配置”即可持久化。`, "ok");
           } catch (error) {
-            setStatus(elements.outputStatus, `元数据拉取失败: ${error.message}`, "error");
+            setStatus(elements.sub2apiConfigStatus, `同步失败：${error instanceof Error ? error.message : "无法读取分组/代理。"}`, "error");
           } finally {
             elements.fetchSub2apiMeta.disabled = false;
             elements.fetchSub2apiMeta.textContent = originalText;

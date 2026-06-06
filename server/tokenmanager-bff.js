@@ -133,15 +133,65 @@ function normalizePublicPath(value, fallback = "/api/v1") {
   return raw.startsWith("/") ? raw : `/${raw}`;
 }
 
-function createSub2ApiBrowserDefaultUrl(env = process.env) {
-  const explicit = String(env.TOKENMANAGER_SUB2API_DEFAULT_URL || "").trim();
-  if (explicit) {
-    return explicit;
+function stripPathSuffix(value, suffix) {
+  const normalized = normalizePublicPath(value, "/").replace(/\/+$/, "") || "/";
+  const normalizedSuffix = normalizePublicPath(suffix, "").replace(/\/+$/, "");
+  if (normalizedSuffix && normalized.endsWith(normalizedSuffix)) {
+    return normalized.slice(0, -normalizedSuffix.length).replace(/\/+$/, "") || "/";
+  }
+  return normalized;
+}
+
+function splitBrowserDefaultUrl(value, importPath) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return {};
   }
 
-  const host = String(env.TOKENMANAGER_SUB2API_DEFAULT_HOST || env.TOKENMANAGER_SUB2API_DEFAULT_ORIGIN || "").trim();
-  const pathName = normalizePublicPath(env.TOKENMANAGER_SUB2API_DEFAULT_PATH, "/api/v1");
-  return host ? joinUrlParts(host, pathName) : pathName;
+  if (raw.startsWith("/")) {
+    return { apiBasePath: stripPathSuffix(raw, importPath) };
+  }
+
+  const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(candidate);
+    const pathName = parsed.pathname && parsed.pathname !== "/"
+      ? stripPathSuffix(parsed.pathname, importPath)
+      : undefined;
+    return {
+      origin: /^https?:\/\//i.test(raw) ? parsed.origin : raw.split(/[/?#]/)[0],
+      apiBasePath: pathName,
+    };
+  } catch {
+    return { origin: raw };
+  }
+}
+
+function createSub2ApiBrowserDefaults(env = process.env) {
+  const importPath = normalizePublicPath(env.TOKENMANAGER_SUB2API_IMPORT_PATH, "/admin/accounts/data");
+  let apiBasePath = normalizePublicPath(
+    env.TOKENMANAGER_SUB2API_API_BASE_PATH || env.TOKENMANAGER_SUB2API_DEFAULT_PATH,
+    "/api/v1",
+  );
+  let origin = String(env.TOKENMANAGER_SUB2API_DEFAULT_ORIGIN || env.TOKENMANAGER_SUB2API_DEFAULT_HOST || "").trim();
+
+  const legacyDefaultUrl = String(env.TOKENMANAGER_SUB2API_DEFAULT_URL || "").trim();
+  if (legacyDefaultUrl) {
+    const parsed = splitBrowserDefaultUrl(legacyDefaultUrl, importPath);
+    origin = parsed.origin || origin;
+    apiBasePath = parsed.apiBasePath || apiBasePath;
+  }
+
+  return {
+    origin,
+    apiBasePath,
+    importPath,
+    defaultUrl: origin ? joinUrlParts(origin, apiBasePath) : apiBasePath,
+  };
+}
+
+function createSub2ApiBrowserDefaultUrl(env = process.env) {
+  return createSub2ApiBrowserDefaults(env).defaultUrl;
 }
 
 
@@ -155,7 +205,7 @@ function createConfig(env = process.env) {
     port: parsePositiveInteger(env.TOKENMANAGER_PORT || env.PORT, 8787),
     authOnly: parseBoolean(env.TOKENMANAGER_AUTH_ONLY, false),
     sub2apiBaseUrl: normalizeBaseUrl(env.SUB2API_BASE_URL),
-    sub2apiBrowserDefaultUrl: createSub2ApiBrowserDefaultUrl(env),
+    sub2apiBrowserDefaults: createSub2ApiBrowserDefaults(env),
     sub2apiAdminApiKey: String(env.SUB2API_ADMIN_API_KEY || "").trim(),
     sub2apiAdminBearerToken: String(env.SUB2API_ADMIN_BEARER_TOKEN || env.SUB2API_BEARER_TOKEN || "").trim(),
     sub2apiJwtSecret: String(env.SUB2API_JWT_SECRET || ""),
@@ -830,8 +880,12 @@ async function handleAuth(req, res, parsedUrl, context) {
       jsonResponse(res, 401, { error: "not_authenticated" });
       return;
     }
+    const defaults = config.sub2apiBrowserDefaults || createSub2ApiBrowserDefaults({});
     jsonResponse(res, 200, {
-      sub2api_default_url: config.sub2apiBrowserDefaultUrl || "/api/v1",
+      sub2api_default_origin: defaults.origin || "",
+      sub2api_api_base_path: defaults.apiBasePath || "/api/v1",
+      sub2api_import_path: defaults.importPath || "/admin/accounts/data",
+      sub2api_default_url: defaults.defaultUrl || defaults.apiBasePath || "/api/v1",
     }, {
       "Cache-Control": "no-store",
     });
@@ -964,6 +1018,7 @@ module.exports = {
   SessionManager,
   Sub2ApiTokenManager,
   createConfig,
+  createSub2ApiBrowserDefaults,
   createSub2ApiBrowserDefaultUrl,
   createTokenManagerServer,
   hashPassword,

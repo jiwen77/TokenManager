@@ -520,14 +520,14 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ sub2api_default_url: "api.example.com/custom-api" }),
+        json: async () => ({ sub2api_default_origin: "https://api.example.com", sub2api_api_base_path: "/custom-api" }),
       };
     },
   });
 
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(elements.get("#sub2api-url").value, "api.example.com/custom-api");
+  assert.equal(elements.get("#sub2api-url").value, "https://api.example.com");
 }
 
 async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
@@ -545,7 +545,7 @@ async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
         return {
           ok: true,
           status: 200,
-          json: async () => ({}),
+          json: async () => ({ sub2api_api_base_path: "/api/v1" }),
         };
       }
 

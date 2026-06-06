@@ -4,7 +4,7 @@
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const { test } = require("node:test");
-const { createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, verifyPasswordHash } = require("../server/tokenmanager-bff");
+const { createSub2ApiBrowserDefaults, createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, verifyPasswordHash } = require("../server/tokenmanager-bff");
 
 function listen(server) {
   return new Promise((resolve) => {
@@ -49,7 +49,7 @@ async function startBff(configOverrides = {}, sub2apiBaseUrl) {
     cookiePath: "/",
     maxBodyBytes: 1024 * 1024,
     upstreamTimeoutMs: 5000,
-    sub2apiBrowserDefaultUrl: "/api/v1",
+    sub2apiBrowserDefaults: { origin: "", apiBasePath: "/api/v1", importPath: "/admin/accounts/data", defaultUrl: "/api/v1" },
     ...configOverrides,
   };
   const server = createTokenManagerServer({ config, logger: { info() {}, warn() {}, error() {} } });
@@ -81,16 +81,36 @@ test("hashPassword creates verifiable scrypt hashes", async () => {
   assert.equal(await verifyPasswordHash("wrong-password", encoded), false);
 });
 
-test("browser-facing sub2api default URL can be composed from env-style fields", () => {
-  assert.equal(createSub2ApiBrowserDefaultUrl({}), "/api/v1");
-  assert.equal(
-    createSub2ApiBrowserDefaultUrl({ TOKENMANAGER_SUB2API_DEFAULT_HOST: "api.example.com", TOKENMANAGER_SUB2API_DEFAULT_PATH: "custom/api" }),
-    "api.example.com/custom/api",
+test("browser-facing sub2api defaults keep server origin separate from API paths", () => {
+  assert.deepEqual(createSub2ApiBrowserDefaults({}), {
+    origin: "",
+    apiBasePath: "/api/v1",
+    importPath: "/admin/accounts/data",
+    defaultUrl: "/api/v1",
+  });
+  assert.deepEqual(
+    createSub2ApiBrowserDefaults({
+      TOKENMANAGER_SUB2API_DEFAULT_ORIGIN: "https://api.example.com",
+      TOKENMANAGER_SUB2API_API_BASE_PATH: "custom/api",
+      TOKENMANAGER_SUB2API_IMPORT_PATH: "admin/import",
+    }),
+    {
+      origin: "https://api.example.com",
+      apiBasePath: "/custom/api",
+      importPath: "/admin/import",
+      defaultUrl: "https://api.example.com/custom/api",
+    },
   );
-  assert.equal(
-    createSub2ApiBrowserDefaultUrl({ TOKENMANAGER_SUB2API_DEFAULT_URL: "https://sub2api.example.com/api/v1" }),
-    "https://sub2api.example.com/api/v1",
+  assert.deepEqual(
+    createSub2ApiBrowserDefaults({ TOKENMANAGER_SUB2API_DEFAULT_URL: "https://sub2api.example.com/api/v1" }),
+    {
+      origin: "https://sub2api.example.com",
+      apiBasePath: "/api/v1",
+      importPath: "/admin/accounts/data",
+      defaultUrl: "https://sub2api.example.com/api/v1",
+    },
   );
+  assert.equal(createSub2ApiBrowserDefaultUrl({ TOKENMANAGER_SUB2API_DEFAULT_ORIGIN: "api.example.com" }), "api.example.com/api/v1");
 });
 
 
@@ -152,7 +172,7 @@ test("authenticated config exposes only non-secret browser defaults", async () =
     authOnly: true,
     sub2apiAdminEmail: "",
     sub2apiAdminPassword: "",
-    sub2apiBrowserDefaultUrl: "api.example.com/custom-api",
+    sub2apiBrowserDefaults: { origin: "https://api.example.com", apiBasePath: "/custom-api", importPath: "/admin/accounts/data", defaultUrl: "https://api.example.com/custom-api" },
   }, mock.baseUrl);
 
   try {
@@ -172,7 +192,10 @@ test("authenticated config exposes only non-secret browser defaults", async () =
       headers: { Cookie: cookie },
     });
     assert.equal(config.response.status, 200);
-    assert.equal(config.body.sub2api_default_url, "api.example.com/custom-api");
+    assert.equal(config.body.sub2api_default_origin, "https://api.example.com");
+    assert.equal(config.body.sub2api_api_base_path, "/custom-api");
+    assert.equal(config.body.sub2api_import_path, "/admin/accounts/data");
+    assert.equal(config.body.sub2api_default_url, "https://api.example.com/custom-api");
     assert.equal(config.body.bearer_token, undefined);
     assert.equal(config.response.headers.get("cache-control"), "no-store");
   } finally {

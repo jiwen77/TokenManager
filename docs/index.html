@@ -937,8 +937,8 @@
             <div class="import-config" aria-label="sub2api 导入配置">
               <div class="import-config-grid">
                 <div class="config-field">
-                  <label for="sub2api-url">sub2api 地址</label>
-                  <input id="sub2api-url" type="text" value="/api/v1" placeholder="/api/v1、api.example.com 或 https://api.example.com:8443" spellcheck="false" />
+                  <label for="sub2api-url">sub2api 服务器地址</label>
+                  <input id="sub2api-url" type="text" placeholder="https://api.example.com 或 ip:端口" spellcheck="false" />
                 </div>
                 <div class="config-field">
                   <label for="sub2api-token">Bearer Token</label>
@@ -982,7 +982,7 @@
                 </div>
               </div>
 
-              <div class="config-hint" style="margin-top: 10px;">可填同域路径（如 /api/v1）、域名、ip:端口、API base URL 或完整导入接口；未包含 /admin/accounts/data 时会自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。</div>
+              <div class="config-hint" style="margin-top: 10px;">只需填写 sub2api 的服务器地址（域名或 ip:端口）；API 路径和导入路径由服务器 .env 自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。</div>
             </div>
             <section class="server-accounts-card" aria-labelledby="server-accounts-title">
               <div class="server-accounts-head">
@@ -1957,10 +1957,19 @@
         }
 
         const DEFAULT_SUB2API_API_BASE = "/api/v1";
-        const SUB2API_IMPORT_PATH = "/admin/accounts/data";
+        const DEFAULT_SUB2API_IMPORT_PATH = "/admin/accounts/data";
+        const sub2apiBrowserConfig = {
+          apiBasePath: DEFAULT_SUB2API_API_BASE,
+          importPath: DEFAULT_SUB2API_IMPORT_PATH,
+        };
 
         function getDefaultUrlProtocol() {
           return window.location?.protocol === "http:" ? "http" : "https";
+        }
+
+        function getCurrentBrowserOrigin() {
+          const origin = window.location?.origin;
+          return origin && origin !== "null" ? origin : "";
         }
 
         function looksLikeUrlHost(value) {
@@ -1971,8 +1980,28 @@
             || /^\[[^\]]+\](?::\d+)?$/.test(head);
         }
 
+        function normalizePublicPath(value, fallback) {
+          const raw = String(value || fallback || "").trim();
+          if (!raw) {
+            return fallback || "";
+          }
+          return raw.startsWith("/") ? raw : `/${raw}`;
+        }
+
+        function stripPathSuffix(value, suffix) {
+          const normalized = normalizePublicPath(value, "/").replace(/\/+$/, "") || "/";
+          const normalizedSuffix = normalizePublicPath(suffix, "").replace(/\/+$/, "");
+          if (normalizedSuffix && normalized.endsWith(normalizedSuffix)) {
+            return normalized.slice(0, -normalizedSuffix.length).replace(/\/+$/, "") || "/";
+          }
+          return normalized;
+        }
+
         function normalizeUrlLikeInput(value) {
-          const raw = String(value || "").trim() || DEFAULT_SUB2API_API_BASE;
+          const raw = String(value || "").trim();
+          if (!raw) {
+            return "";
+          }
           if (/^https?:\/\//i.test(raw)) {
             return raw;
           }
@@ -1992,35 +2021,31 @@
           return `${String(base || "").replace(/\/+$/, "")}/${String(path || "").replace(/^\/+/, "")}`;
         }
 
-        function getUrlPathname(value) {
+        function splitSub2ApiAddress(value) {
+          const normalized = normalizeUrlLikeInput(value);
+          if (!normalized) {
+            return { origin: getCurrentBrowserOrigin(), apiBasePath: sub2apiBrowserConfig.apiBasePath };
+          }
+
+          if (normalized.startsWith("/")) {
+            return {
+              origin: "",
+              apiBasePath: stripPathSuffix(normalized, sub2apiBrowserConfig.importPath),
+            };
+          }
+
           try {
-            return new URL(value, window.location?.origin || "https://tokenmanager.local").pathname;
+            const parsed = new URL(normalized);
+            const hasPath = parsed.pathname && parsed.pathname !== "/";
+            return {
+              origin: parsed.origin,
+              apiBasePath: hasPath
+                ? stripPathSuffix(parsed.pathname, sub2apiBrowserConfig.importPath)
+                : sub2apiBrowserConfig.apiBasePath,
+            };
           } catch {
-            return "";
+            return { origin: normalized, apiBasePath: sub2apiBrowserConfig.apiBasePath };
           }
-        }
-
-        function normalizeSub2ApiAdminBase(value) {
-          let base = normalizeUrlLikeInput(value)
-            .replace(/[?#].*$/, "")
-            .replace(/\/+$/, "");
-
-          for (const suffix of [SUB2API_IMPORT_PATH, "/admin/accounts"]) {
-            if (base.endsWith(suffix)) {
-              base = base.slice(0, -suffix.length).replace(/\/+$/, "");
-            }
-          }
-
-          if (!base) {
-            return DEFAULT_SUB2API_API_BASE;
-          }
-
-          const pathName = getUrlPathname(base);
-          if (!pathName || pathName === "/") {
-            return joinUrlPath(base, DEFAULT_SUB2API_API_BASE);
-          }
-
-          return base;
         }
 
         function getSub2ApiBearerToken() {
@@ -2028,11 +2053,12 @@
         }
 
         function getSub2ApiAdminBase() {
-          return normalizeSub2ApiAdminBase(elements.sub2apiUrl?.value);
+          const { origin, apiBasePath } = splitSub2ApiAddress(elements.sub2apiUrl?.value);
+          return origin ? joinUrlPath(origin, apiBasePath) : apiBasePath;
         }
 
         function getSub2ApiEndpoint() {
-          return joinUrlPath(getSub2ApiAdminBase(), SUB2API_IMPORT_PATH);
+          return joinUrlPath(getSub2ApiAdminBase(), sub2apiBrowserConfig.importPath);
         }
 
         function getSub2ApiAdminUrl(path) {
@@ -2042,6 +2068,37 @@
         function canLoadServerDefaults() {
           const protocol = window.location?.protocol || "";
           return protocol === "http:" || protocol === "https:";
+        }
+
+        function hydrateSub2ApiBrowserConfig(payload) {
+          sub2apiBrowserConfig.apiBasePath = normalizePublicPath(
+            firstNonEmpty(payload.sub2api_api_base_path, payload.sub2apiApiBasePath),
+            DEFAULT_SUB2API_API_BASE,
+          );
+          sub2apiBrowserConfig.importPath = normalizePublicPath(
+            firstNonEmpty(payload.sub2api_import_path, payload.sub2apiImportPath),
+            DEFAULT_SUB2API_IMPORT_PATH,
+          );
+
+          const defaultOrigin = firstNonEmpty(
+            payload.sub2api_default_origin,
+            payload.sub2apiDefaultOrigin,
+          );
+          if (defaultOrigin && !elements.sub2apiUrl.dataset.userEdited) {
+            elements.sub2apiUrl.value = defaultOrigin;
+            return;
+          }
+
+          // Backward compatibility for older BFF config payloads.
+          const legacyDefaultUrl = firstNonEmpty(payload.sub2api_default_url, payload.sub2apiDefaultUrl);
+          if (legacyDefaultUrl && !elements.sub2apiUrl.dataset.userEdited) {
+            const { origin, apiBasePath } = splitSub2ApiAddress(legacyDefaultUrl);
+            if (origin) {
+              elements.sub2apiUrl.value = origin;
+            } else if (apiBasePath && apiBasePath !== DEFAULT_SUB2API_API_BASE) {
+              elements.sub2apiUrl.value = apiBasePath;
+            }
+          }
         }
 
         async function hydrateSub2ApiDefaults() {
@@ -2057,11 +2114,7 @@
             if (!response.ok) {
               return;
             }
-            const payload = await response.json();
-            const defaultUrl = firstNonEmpty(payload.sub2api_default_url, payload.sub2apiDefaultUrl);
-            if (defaultUrl && !elements.sub2apiUrl.dataset.userEdited) {
-              elements.sub2apiUrl.value = defaultUrl;
-            }
+            hydrateSub2ApiBrowserConfig(await response.json());
           } catch {
             // Static/local usage does not require the BFF config endpoint.
           }

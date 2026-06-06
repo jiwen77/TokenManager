@@ -21,6 +21,9 @@ const DEFAULT_SUB2API_BASE_URL = "http://127.0.0.1:8080/api/v1";
 const DEFAULT_COOKIE_NAME = "__Host-tokenmanager-session";
 const DEFAULT_SESSION_TTL_SECONDS = 12 * 60 * 60;
 const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024;
+const DEFAULT_LOGIN_MAX_FAILURES = 5;
+const DEFAULT_LOGIN_WINDOW_SECONDS = 15 * 60;
+const DEFAULT_LOGIN_LOCK_SECONDS = 15 * 60;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const SCRYPT_PREFIX = "scrypt:v1";
 const DEFAULT_APP_BASE_PATH = "/token-manager";
@@ -32,11 +35,31 @@ const ALLOWED_PROXY_ROUTES = [
   { method: "PUT", pattern: /^\/admin\/accounts\/\d+$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/\d+\/apply-oauth-credentials$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/\d+\/set-privacy$/ },
+  { method: "POST", pattern: /^\/admin\/accounts\/\d+\/schedulable$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/batch$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/data$/ },
   { method: "GET", pattern: /^\/admin\/groups\/all$/ },
   { method: "GET", pattern: /^\/admin\/proxies\/all$/ },
 ];
+
+const SENSITIVE_ACCOUNT_RESPONSE_KEYS = new Set([
+  "access_token",
+  "accesstoken",
+  "refresh_token",
+  "refreshtoken",
+  "session_token",
+  "sessiontoken",
+  "id_token",
+  "idtoken",
+  "api_key",
+  "apikey",
+  "openai_api_key",
+  "openaiapikey",
+  "authorization",
+  "bearer",
+  "password",
+  "secret",
+]);
 
 function parseBoolean(value, fallback) {
   if (value === undefined || value === null || value === "") {
@@ -48,6 +71,11 @@ function parseBoolean(value, fallback) {
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseNonNegativeInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function stripInlineComment(value) {
@@ -350,6 +378,9 @@ function createConfig(env = process.env) {
     cookieSecure,
     cookieSameSite: env.TOKENMANAGER_COOKIE_SAMESITE || "Lax",
     cookiePath: env.TOKENMANAGER_COOKIE_PATH || "/",
+    loginMaxFailures: parseNonNegativeInteger(env.TOKENMANAGER_LOGIN_MAX_FAILURES, DEFAULT_LOGIN_MAX_FAILURES),
+    loginWindowSeconds: parsePositiveInteger(env.TOKENMANAGER_LOGIN_WINDOW_SECONDS, DEFAULT_LOGIN_WINDOW_SECONDS),
+    loginLockSeconds: parsePositiveInteger(env.TOKENMANAGER_LOGIN_LOCK_SECONDS, DEFAULT_LOGIN_LOCK_SECONDS),
     appBasePath: normalizePublicPath(env.TOKENMANAGER_BASE_PATH || DEFAULT_APP_BASE_PATH, DEFAULT_APP_BASE_PATH).replace(/\/+$/, "") || DEFAULT_APP_BASE_PATH,
     staticDir: path.resolve(env.TOKENMANAGER_STATIC_DIR || path.join(__dirname, "..", "docs")),
     envFile: path.resolve(defaultEnvFilePath(env)),
@@ -464,7 +495,11 @@ function parseCookies(header) {
     const key = item.slice(0, index).trim();
     const value = item.slice(index + 1).trim();
     if (key) {
-      cookies.set(key, decodeURIComponent(value));
+      try {
+        cookies.set(key, decodeURIComponent(value));
+      } catch {
+        cookies.set(key, value);
+      }
     }
   }
   return cookies;
@@ -547,6 +582,92 @@ class SessionManager {
   }
 }
 
+function getClientAddress(req) {
+  const forwardedFor = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const address = forwardedFor || req.socket?.remoteAddress || "unknown";
+  return address.replace(/^::ffff:/, "") || "unknown";
+}
+
+function getLoginRateLimitKey(req, username) {
+  const source = getClientAddress(req);
+  const normalizedUsername = String(username || "_password_only").trim().toLowerCase() || "_password_only";
+  return `${source}|${normalizedUsername}`;
+}
+
+class LoginRateLimiter {
+  constructor(config, options = {}) {
+    this.config = config;
+    this.entries = new Map();
+    this.now = options.now || (() => Date.now());
+  }
+
+  isEnabled() {
+    return Number(this.config.loginMaxFailures) > 0
+      && Number(this.config.loginWindowSeconds) > 0
+      && Number(this.config.loginLockSeconds) > 0;
+  }
+
+  cleanup(now = this.now()) {
+    for (const [key, entry] of this.entries.entries()) {
+      const windowExpired = !entry.firstFailureAt || now - entry.firstFailureAt > this.config.loginWindowSeconds * 1000;
+      const lockExpired = !entry.lockedUntil || entry.lockedUntil <= now;
+      if (windowExpired && lockExpired) {
+        this.entries.delete(key);
+      }
+    }
+  }
+
+  check(key) {
+    if (!this.isEnabled()) {
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
+
+    const now = this.now();
+    const entry = this.entries.get(key);
+    if (!entry || !entry.lockedUntil || entry.lockedUntil <= now) {
+      if (entry && entry.lockedUntil && entry.lockedUntil <= now) {
+        this.entries.delete(key);
+      }
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
+
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((entry.lockedUntil - now) / 1000)),
+    };
+  }
+
+  recordFailure(key) {
+    if (!this.isEnabled()) {
+      return { locked: false, retryAfterSeconds: 0 };
+    }
+
+    const now = this.now();
+    const windowMs = this.config.loginWindowSeconds * 1000;
+    const lockMs = this.config.loginLockSeconds * 1000;
+    const current = this.entries.get(key);
+    const entry = current && current.firstFailureAt && now - current.firstFailureAt <= windowMs
+      ? current
+      : { firstFailureAt: now, failures: 0, lockedUntil: 0 };
+
+    entry.failures += 1;
+    entry.lastFailureAt = now;
+    if (entry.failures >= this.config.loginMaxFailures) {
+      entry.lockedUntil = now + lockMs;
+    }
+    this.entries.set(key, entry);
+    this.cleanup(now);
+
+    return entry.lockedUntil && entry.lockedUntil > now
+      ? { locked: true, retryAfterSeconds: Math.max(1, Math.ceil((entry.lockedUntil - now) / 1000)) }
+      : { locked: false, retryAfterSeconds: 0 };
+  }
+
+  recordSuccess(key) {
+    this.entries.delete(key);
+  }
+}
+
 function jsonResponse(res, status, payload, headers = {}) {
   const body = Buffer.from(JSON.stringify(payload));
   res.writeHead(status, {
@@ -596,9 +717,24 @@ const STATIC_CONTENT_TYPES = new Map([
   [".txt", "text/plain; charset=utf-8"],
 ]);
 
-function tokenManagerSecurityHeaders(headers = {}) {
+function buildContentSecurityPolicy(options = {}) {
+  const nonce = options.nonce ? ` 'nonce-${options.nonce}'` : "";
+  return [
+    "default-src 'self'",
+    `script-src 'self'${nonce}`,
+    `style-src 'self'${nonce}`,
+    "img-src 'self' data: blob:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
+
+function tokenManagerSecurityHeaders(headers = {}, options = {}) {
   return {
-    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'",
+    "Content-Security-Policy": buildContentSecurityPolicy(options),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     ...headers,
@@ -689,42 +825,39 @@ function serveStaticFile(req, res, filePath) {
   fs.createReadStream(filePath).pipe(res);
 }
 
-function tokenManagerLoginPage() {
+function tokenManagerLoginPage(options = {}) {
+  const nonceAttribute = options.nonce ? ` nonce="${options.nonce}"` : "";
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TokenManager 登录</title>
-  <style>
+  <style${nonceAttribute}>
     :root { color-scheme: light; --bg: #f4efe7; --card: #fffaf2; --text: #172326; --muted: #6f7a7d; --accent: #24505a; --line: #ded4c5; --danger: #9f2d20; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at top, #fff7e8, var(--bg)); color: var(--text); }
     main { width: min(100%, 420px); border: 1px solid var(--line); border-radius: 20px; background: var(--card); box-shadow: 0 24px 80px rgba(23, 35, 38, 0.14); padding: 26px; }
-    h1 { margin: 0 0 8px; font-size: 1.35rem; }
-    p { margin: 0 0 20px; color: var(--muted); line-height: 1.6; }
+    h1 { margin: 0 0 20px; font-size: 1.35rem; }
     label { display: block; margin-bottom: 8px; font-weight: 800; color: var(--accent); }
     input { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 1rem; background: #fff; color: var(--text); }
     input:focus { outline: 3px solid rgba(36, 80, 90, 0.18); border-color: var(--accent); }
     button { width: 100%; min-height: 44px; margin-top: 14px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 900; font-size: 1rem; cursor: pointer; }
     button:disabled { opacity: 0.68; cursor: wait; }
     .status { min-height: 22px; margin-top: 12px; color: var(--danger); font-size: 0.92rem; }
-    .hint { margin-top: 18px; font-size: 0.86rem; color: var(--muted); }
   </style>
 </head>
 <body>
   <main>
-    <h1>TokenManager 访问密码</h1>
-    <p>请输入页面访问密码。登录成功后才能打开 TokenManager 工具页面。</p>
+    <h1>TokenManager</h1>
     <form id="login-form" autocomplete="off">
-      <label for="password">访问密码</label>
+      <label for="password">密码</label>
       <input id="password" name="password" type="password" autocomplete="current-password" autofocus required />
-      <button id="submit" type="submit">进入 TokenManager</button>
+      <button id="submit" type="submit">进入</button>
       <div class="status" id="status" role="status" aria-live="polite"></div>
     </form>
-    <div class="hint">无需用户名；sub2api URL 和 Bearer Token 进入页面后再自行填写。</div>
   </main>
-  <script>
+  <script${nonceAttribute}>
     const form = document.querySelector('#login-form');
     const password = document.querySelector('#password');
     const submit = document.querySelector('#submit');
@@ -741,7 +874,11 @@ function tokenManagerLoginPage() {
           body: JSON.stringify({ password: password.value }),
         });
         if (!response.ok) {
-          status.textContent = response.status === 401 ? '密码不正确。' : '登录失败，请稍后重试。';
+          status.textContent = response.status === 401
+            ? '密码不正确。'
+            : response.status === 429
+              ? '尝试次数过多，请稍后再试。'
+              : '登录失败，请稍后重试。';
           submit.disabled = false;
           password.select();
           return;
@@ -755,6 +892,11 @@ function tokenManagerLoginPage() {
   </script>
 </body>
 </html>`;
+}
+
+function loginPageResponse(res, status = 401) {
+  const nonce = base64url(crypto.randomBytes(16));
+  htmlResponse(res, status, tokenManagerLoginPage({ nonce }), tokenManagerSecurityHeaders({}, { nonce }));
 }
 
 function methodNotAllowed(res) {
@@ -1011,6 +1153,45 @@ function isAllowedProxyRoute(method, pathname) {
   return ALLOWED_PROXY_ROUTES.some((route) => route.method === method && route.pattern.test(pathname));
 }
 
+function normalizeSensitiveResponseKey(key) {
+  return String(key || "").replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+}
+
+function sanitizeAccountProxyPayload(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAccountProxyPayload(item));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const next = {};
+  for (const [key, child] of Object.entries(value)) {
+    const normalizedKey = normalizeSensitiveResponseKey(key);
+    if (SENSITIVE_ACCOUNT_RESPONSE_KEYS.has(key) || SENSITIVE_ACCOUNT_RESPONSE_KEYS.has(normalizedKey)) {
+      continue;
+    }
+    next[key] = sanitizeAccountProxyPayload(child);
+  }
+  return next;
+}
+
+function sanitizeProxyResponseBuffer(proxyPath, method, responseBuffer, upstreamHeaders) {
+  if (method !== "GET" || proxyPath !== "/admin/accounts") {
+    return responseBuffer;
+  }
+  const contentType = String(upstreamHeaders.get("content-type") || "");
+  if (contentType && !/json/i.test(contentType)) {
+    return responseBuffer;
+  }
+  try {
+    const payload = JSON.parse(responseBuffer.toString("utf8"));
+    return Buffer.from(JSON.stringify(sanitizeAccountProxyPayload(payload)));
+  } catch {
+    return responseBuffer;
+  }
+}
+
 function getProxyPath(requestPathname, config) {
   const prefix = getApiPrefix(requestPathname, config) || LEGACY_API_PREFIX;
   const stripped = requestPathname.slice(prefix.length) || "/";
@@ -1087,7 +1268,12 @@ async function handleProxy(req, res, parsedUrl, context) {
     upstream = await proxyOnce(req, parsedUrl, bodyBuffer, config, tokenManager, runtimeConfig, true);
   }
 
-  const responseBuffer = Buffer.from(await upstream.arrayBuffer());
+  const responseBuffer = sanitizeProxyResponseBuffer(
+    proxyPath,
+    req.method,
+    Buffer.from(await upstream.arrayBuffer()),
+    upstream.headers,
+  );
   res.writeHead(upstream.status, {
     ...copyUpstreamHeaders(upstream.headers),
     "Content-Length": responseBuffer.length,
@@ -1123,7 +1309,7 @@ async function handleApp(req, res, parsedUrl, context) {
 
   const session = sessions.fromRequest(req);
   if (!session) {
-    htmlResponse(res, 401, tokenManagerLoginPage(), tokenManagerSecurityHeaders());
+    loginPageResponse(res, 401);
     return;
   }
 
@@ -1143,7 +1329,7 @@ async function handleApp(req, res, parsedUrl, context) {
 }
 
 async function handleAuth(req, res, parsedUrl, context) {
-  const { config, sessions, runtimeConfigStore } = context;
+  const { config, sessions, runtimeConfigStore, loginRateLimiter } = context;
   const pathname = getNormalizedAuthPath(parsedUrl.pathname, config);
 
   if (pathname === "/token-manager-auth/health") {
@@ -1162,14 +1348,14 @@ async function handleAuth(req, res, parsedUrl, context) {
       });
       res.end();
     } else {
-      htmlResponse(res, 401, tokenManagerLoginPage());
+      loginPageResponse(res, 401);
     }
     return;
   }
 
   if (pathname === "/token-manager-auth/login-page") {
     if (req.method !== "GET") return methodNotAllowed(res);
-    htmlResponse(res, 200, tokenManagerLoginPage());
+    loginPageResponse(res, 200);
     return;
   }
 
@@ -1230,14 +1416,36 @@ async function handleAuth(req, res, parsedUrl, context) {
     const payload = await readJsonBody(req, config.maxBodyBytes);
     const username = String(payload.username || "").trim();
     const password = String(payload.password || "");
+    const rateLimitKey = getLoginRateLimitKey(req, username);
+    const rateLimit = loginRateLimiter.check(rateLimitKey);
+    if (!rateLimit.allowed) {
+      jsonResponse(res, 429, {
+        error: "too_many_login_attempts",
+        retry_after_seconds: rateLimit.retryAfterSeconds,
+      }, {
+        "Retry-After": String(rateLimit.retryAfterSeconds),
+      });
+      return;
+    }
     const usernameOk = !config.loginUsername || timingSafeStringEqual(username, config.loginUsername);
     const passwordOk = password && await verifyLoginPassword(password, config);
     if (!usernameOk || !passwordOk) {
+      const failure = loginRateLimiter.recordFailure(rateLimitKey);
       await new Promise((resolve) => setTimeout(resolve, 250));
+      if (failure.locked) {
+        jsonResponse(res, 429, {
+          error: "too_many_login_attempts",
+          retry_after_seconds: failure.retryAfterSeconds,
+        }, {
+          "Retry-After": String(failure.retryAfterSeconds),
+        });
+        return;
+      }
       jsonResponse(res, 401, { error: "invalid_credentials" });
       return;
     }
 
+    loginRateLimiter.recordSuccess(rateLimitKey);
     sessions.cleanup();
     const session = sessions.create();
     const cookie = serializeCookie(config.cookieName, session.value, {
@@ -1279,9 +1487,10 @@ function createTokenManagerServer(options = {}) {
   const config = options.config || createConfig(options.env || process.env);
   const logger = options.logger || console;
   const sessions = options.sessions || new SessionManager(config);
+  const loginRateLimiter = options.loginRateLimiter || new LoginRateLimiter(config);
   const tokenManager = options.tokenManager || new Sub2ApiTokenManager(config, logger);
   const runtimeConfigStore = options.runtimeConfigStore || new RuntimeConfigStore(config);
-  const context = { config, logger, sessions, tokenManager, runtimeConfigStore };
+  const context = { config, logger, sessions, loginRateLimiter, tokenManager, runtimeConfigStore };
 
   return http.createServer(async (req, res) => {
     try {
@@ -1427,6 +1636,7 @@ if (require.main === module) {
 
 module.exports = {
   ALLOWED_PROXY_ROUTES,
+  LoginRateLimiter,
   RuntimeConfigStore,
   SessionManager,
   Sub2ApiTokenManager,

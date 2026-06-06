@@ -22,6 +22,8 @@
           formatInputPretty: false,
           serverAccounts: [],
           serverAccountTotal: 0,
+          serverAccountSearch: "",
+          selectedServerAccountIds: [],
           availableGroups: [],
           availableProxies: [],
           groupSearch: "",
@@ -48,6 +50,7 @@
           inputStatus: document.querySelector("#input-status"),
           issues: document.querySelector("#issues"),
           loadExample: document.querySelector("#load-example"),
+          logoutButton: document.querySelector("#logout-button"),
           output: document.querySelector("#output"),
           outputImportActions: document.querySelector("#output-import-actions"),
           outputStatus: document.querySelector("#output-status"),
@@ -55,6 +58,15 @@
           pickFiles: document.querySelector("#pick-files"),
           refreshServerAccounts: document.querySelector("#refresh-server-accounts"),
           serverAccountBody: document.querySelector("#server-account-body"),
+          serverAccountSearch: document.querySelector("#server-account-search"),
+          serverAccountSelectionSummary: document.querySelector("#server-account-selection-summary"),
+          toggleVisibleServerAccountSelection: document.querySelector("#toggle-visible-server-account-selection"),
+          applySelectedServerAccountSettings: document.querySelector("#apply-selected-server-account-settings"),
+          privacySelectedServerAccounts: document.querySelector("#privacy-selected-server-accounts"),
+          startSelectedServerAccountSchedule: document.querySelector("#start-selected-server-account-schedule"),
+          stopSelectedServerAccountSchedule: document.querySelector("#stop-selected-server-account-schedule"),
+          enableSelectedServerAccounts: document.querySelector("#enable-selected-server-accounts"),
+          disableSelectedServerAccounts: document.querySelector("#disable-selected-server-accounts"),
           saveSub2apiConfig: document.querySelector("#save-sub2api-config"),
           saveTokenmanagerPassword: document.querySelector("#save-tokenmanager-password"),
           serverAccountStatus: document.querySelector("#server-account-status"),
@@ -239,12 +251,40 @@
 
         function timestampFromUnixSeconds(value) {
           const numeric = Number(value);
-          if (!Number.isFinite(numeric)) {
+          if (!Number.isFinite(numeric) || numeric <= 0) {
             return undefined;
           }
 
           const date = new Date(numeric * 1000);
           return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+        }
+
+        function normalizeDisplayTimestamp(value) {
+          if (value === undefined || value === null || value === "") {
+            return undefined;
+          }
+
+          if (typeof value === "number" || (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim()))) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric) || numeric <= 0) {
+              return undefined;
+            }
+            const milliseconds = numeric > 1e11 ? numeric : numeric * 1000;
+            const date = new Date(milliseconds);
+            return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+          }
+
+          return normalizeTimestamp(value);
+        }
+
+        function firstDisplayTimestamp(...values) {
+          for (const value of values) {
+            const normalized = normalizeDisplayTimestamp(value);
+            if (normalized) {
+              return normalized;
+            }
+          }
+          return undefined;
         }
 
         function unixSecondsFromJwtExp(value) {
@@ -1135,7 +1175,8 @@
 
         function updateImportButtonState() {
           updateSub2ApiToolsVisibility();
-          elements.importSub2api.disabled = !state.converted.length || !isSub2ApiFormat();
+          const canImport = state.converted.length > 0 && isSub2ApiFormat();
+          elements.importSub2api.disabled = !canImport;
         }
 
         function updateOutput() {
@@ -1877,6 +1918,7 @@
             if (!response.ok) {
               return;
             }
+            elements.logoutButton.hidden = false;
             hydrateSub2ApiBrowserConfig(await response.json());
           } catch {
             // Static/local usage does not require the BFF config endpoint.
@@ -2002,6 +2044,24 @@
           }
         }
 
+        async function logoutTokenManager() {
+          elements.logoutButton.disabled = true;
+          try {
+            await fetch("/token-manager/auth/logout", {
+              method: "POST",
+              cache: "no-store",
+              credentials: "same-origin",
+              headers: { Accept: "application/json" },
+            });
+          } finally {
+            if (typeof window.location?.replace === "function") {
+              window.location.replace("/token-manager/");
+            } else if (window.location) {
+              window.location.href = "/token-manager/";
+            }
+          }
+        }
+
         function buildUrlWithQuery(url, params) {
           const query = Object.entries(params)
             .filter(([, value]) => value !== undefined && value !== null && value !== "")
@@ -2102,35 +2162,693 @@
           };
         }
 
-        function getServerAccountDisplay(account) {
-          const credentials = isPlainObject(account.credentials) ? account.credentials : {};
-          const extra = isPlainObject(account.extra) ? account.extra : {};
-          const email = firstNonEmpty(account.email, credentials.email, extra.email);
-          const name = firstNonEmpty(account.name, email, credentials.chatgpt_account_id, String(account.id || ""));
-          const expiresAt = normalizeTimestamp(account.expires_at)
-            || normalizeTimestamp(credentials.expires_at)
-            || timestampFromUnixSeconds(credentials.exp)
-            || timestampFromUnixSeconds(account.expires_at);
-          const status = firstNonEmpty(account.status, account.state, account.disabled ? "disabled" : "active");
+        function getServerAccountRecord(account) {
+          if (!isPlainObject(account)) {
+            return {};
+          }
 
-          return { name, email, expiresAt, status };
+          const nested = isPlainObject(account.account) ? account.account : {};
+          const merged = { ...nested };
+          Object.entries(account).forEach(([key, value]) => {
+            if (key === "account" || value === undefined || value === null || value === "") {
+              return;
+            }
+            if (Array.isArray(value) && !value.length && Array.isArray(merged[key]) && merged[key].length) {
+              return;
+            }
+            merged[key] = value;
+          });
+          return merged;
+        }
+
+        function uniqueTextItems(items) {
+          const seen = new Set();
+          return items
+            .map((item) => String(item ?? "").trim())
+            .filter(Boolean)
+            .filter((item) => {
+              const key = item.toLowerCase();
+              if (seen.has(key)) {
+                return false;
+              }
+              seen.add(key);
+              return true;
+            });
+        }
+
+        function splitTextLabels(value) {
+          return String(value || "")
+            .split(/[、,]/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+        }
+
+        function getGroupLabel(group) {
+          if (!isPlainObject(group)) {
+            return firstNonEmptyText(group);
+          }
+
+          const nestedGroup = isPlainObject(group.group) ? group.group : {};
+          const label = firstNonEmptyText(
+            nestedGroup.name,
+            nestedGroup.label,
+            nestedGroup.title,
+            group.name,
+            group.label,
+            group.title,
+            group.group_name,
+            group.groupName,
+          );
+          if (label) {
+            return label;
+          }
+
+          const id = firstNonEmptyText(group.group_id, group.groupId, nestedGroup.id, group.id);
+          return id ? `#${id}` : "";
+        }
+
+        function groupLabelsFromValue(value) {
+          if (typeof value === "string" && value.trim()) {
+            return splitTextLabels(value);
+          }
+          if (Array.isArray(value)) {
+            return value.map(getGroupLabel).filter(Boolean);
+          }
+          if (isPlainObject(value)) {
+            return [getGroupLabel(value)].filter(Boolean);
+          }
+          return [];
+        }
+
+        function groupIdLabelsFromValue(value) {
+          const items = Array.isArray(value) ? value : value === undefined || value === null || value === "" ? [] : [value];
+          return items.map((item) => {
+            const id = firstNonEmptyText(item);
+            return id ? `#${id}` : "";
+          }).filter(Boolean);
+        }
+
+        function getServerAccountId(account) {
+          const record = getServerAccountRecord(account);
+          return firstNonEmptyText(record.id, record.account_id, record.accountId, record.uuid);
+        }
+
+        function getGroupLabels(account) {
+          const record = getServerAccountRecord(account);
+          const namedLabels = uniqueTextItems([
+            ...groupLabelsFromValue(record.groups),
+            ...groupLabelsFromValue(record.account_groups),
+            ...groupLabelsFromValue(record.accountGroups),
+            ...groupLabelsFromValue(record.group_names),
+            ...groupLabelsFromValue(record.groupNames),
+          ]);
+          if (namedLabels.length) {
+            return namedLabels;
+          }
+
+          return uniqueTextItems([
+            ...groupIdLabelsFromValue(record.group_ids),
+            ...groupIdLabelsFromValue(record.groupIds),
+          ]);
+        }
+
+        function getProxyLabel(account) {
+          const record = getServerAccountRecord(account);
+          if (typeof record.proxy === "string" && record.proxy.trim() && record.proxy.trim() !== "[object Object]") {
+            return record.proxy.trim();
+          }
+          const proxy = isPlainObject(record.proxy) ? record.proxy : {};
+          const proxyId = firstNonEmptyText(record.proxy_id, record.proxyId, proxy.id);
+          const proxyName = firstNonEmptyText(record.proxy_name, record.proxyName, proxy.name, proxy.label, proxy.title);
+          if (proxyName && proxyId) {
+            return `${proxyName} (#${proxyId})`;
+          }
+          return proxyName || (proxyId ? `#${proxyId}` : "未设置");
+        }
+
+        function isOAuthServerAccount(recordOrDisplay) {
+          const type = firstNonEmptyText(recordOrDisplay?.type, recordOrDisplay?.account_type, recordOrDisplay?.accountType);
+          return type.toLowerCase() === "oauth";
+        }
+
+        function normalizePlanType(value) {
+          const raw = firstNonEmptyText(value);
+          if (!raw) {
+            return "";
+          }
+          return raw.toLowerCase().replace(/[\s_]+/g, "-");
+        }
+
+        function getPlanTypeMeta(value, recordOrDisplay = {}) {
+          if (!isOAuthServerAccount(recordOrDisplay)) {
+            return { visible: false, state: "none", label: "", title: "" };
+          }
+
+          const raw = firstNonEmptyText(value) || "unknown";
+          const normalized = normalizePlanType(raw);
+          const known = {
+            free: { state: "free", label: "FREE" },
+            plus: { state: "plus", label: "PLUS" },
+            team: { state: "team", label: "TEAM" },
+            "pro-lite": { state: "pro-lite", label: "PRO LITE" },
+            chatgptpro: { state: "pro", label: "PRO" },
+            "chatgpt-pro": { state: "pro", label: "PRO" },
+            pro: { state: "pro", label: "PRO" },
+            abnormal: { state: "abnormal", label: "异常" },
+          };
+          const meta = known[normalized] || { state: "unknown", label: raw.toUpperCase() };
+          return {
+            visible: true,
+            state: meta.state,
+            label: meta.label,
+            title: normalized && normalized !== "unknown"
+              ? `OpenAI OAuth 套餐：${raw}`
+              : "OpenAI OAuth 套餐未识别或未返回",
+          };
+        }
+
+        function getPrivacyMeta(value, recordOrDisplay = {}) {
+          const isOAuth = isOAuthServerAccount(recordOrDisplay);
+          if (!isOAuth) {
+            return {
+              label: "privacy: 不适用",
+              actionLabel: "Privacy 不适用",
+              actionDisabled: true,
+              state: "neutral",
+              title: "sub2api 仅支持 OAuth 账号设置 Privacy；apikey 账号没有可关闭的 privacy_mode。",
+              applicable: false,
+              isOff: true,
+            };
+          }
+
+          const raw = firstNonEmptyText(value) || "-";
+          const normalized = raw.toLowerCase().replace(/[\s-]+/g, "_");
+          const isOff = normalized.includes("off")
+            || normalized.includes("disabled")
+            || normalized === "false"
+            || normalized === "0";
+          return {
+            label: `privacy: ${raw}`,
+            actionLabel: isOff ? "Privacy 已关" : "关闭 Privacy",
+            actionDisabled: isOff,
+            state: isOff ? "safe" : "danger",
+            title: isOff ? "训练数据共享已关闭" : "点击调用 sub2api set-privacy，尝试关闭训练数据共享",
+            applicable: true,
+            isOff,
+          };
+        }
+
+        function booleanFromValue(value) {
+          if (typeof value === "boolean") {
+            return value;
+          }
+          if (typeof value === "number" && Number.isFinite(value)) {
+            return value !== 0;
+          }
+          if (typeof value === "string") {
+            const normalized = value.trim().toLowerCase();
+            if (["true", "1", "yes", "on"].includes(normalized)) {
+              return true;
+            }
+            if (["false", "0", "no", "off"].includes(normalized)) {
+              return false;
+            }
+          }
+          return undefined;
+        }
+
+        function getAccountStatusMeta(status) {
+          const raw = firstNonEmptyText(status) || "unknown";
+          const normalized = raw.toLowerCase();
+          if (["active", "enabled", "enable"].includes(normalized)) {
+            return { raw, label: "已启用", state: "active", isActive: true, isDisabled: false, isError: false };
+          }
+          if (["inactive", "disabled", "disable", "paused"].includes(normalized)) {
+            return { raw, label: "账号已禁用", state: "inactive", isActive: false, isDisabled: true, isError: false };
+          }
+          if (normalized === "error") {
+            return { raw, label: "错误", state: "error", isActive: false, isDisabled: false, isError: true };
+          }
+          return { raw, label: raw, state: "unknown", isActive: false, isDisabled: false, isError: false };
+        }
+
+        function hasFutureDisplayTimestamp(value) {
+          const normalized = normalizeDisplayTimestamp(value);
+          if (!normalized) {
+            return false;
+          }
+          const time = new Date(normalized).getTime();
+          return Number.isFinite(time) && time > Date.now();
+        }
+
+        function getScheduleMeta(record, statusMeta) {
+          const schedulableValue = record.schedulable ?? record.schedulableValue;
+          const schedulable = booleanFromValue(schedulableValue);
+          const reason = firstNonEmptyText(record.temp_unschedulable_reason, record.tempUnschedulableReason, record.error_message, record.errorMessage);
+          const hasRateLimit = hasFutureDisplayTimestamp(record.rate_limit_reset_at ?? record.rateLimitResetAt)
+            || hasFutureDisplayTimestamp(record.rate_limited_at ?? record.rateLimitedAt);
+          const hasOverload = hasFutureDisplayTimestamp(record.overload_until ?? record.overloadUntil);
+          const hasTemporaryBlock = hasFutureDisplayTimestamp(record.temp_unschedulable_until ?? record.tempUnschedulableUntil);
+
+          if (statusMeta.isError) {
+            return {
+              label: "错误",
+              chipLabel: reason ? `错误：${reason}` : "错误",
+              state: "danger",
+              action: "enable",
+              actionLabel: "启用账号",
+              actionState: "off",
+              title: reason || "将账号状态设为 active，并启动调度；不刷新或修复账号凭证。",
+              rawSchedulable: schedulable,
+            };
+          }
+
+          if (statusMeta.isDisabled) {
+            return {
+              label: "账号已禁用",
+              chipLabel: "账号已禁用",
+              state: "neutral",
+              action: "enable",
+              actionLabel: "启用账号",
+              actionState: "off",
+              title: "将账号状态设为 active，并启动调度。",
+              rawSchedulable: schedulable,
+            };
+          }
+
+          if (schedulable === false) {
+            const label = hasRateLimit
+              ? "限流中"
+              : hasOverload
+                ? "过载等待"
+                : hasTemporaryBlock
+                  ? "临时不可调度"
+                  : "调度已关闭";
+            return {
+              label,
+              chipLabel: reason ? `${label}：${reason}` : label,
+              state: hasRateLimit || hasOverload || hasTemporaryBlock ? "warning" : "danger",
+              action: "enable",
+              actionLabel: "启动调度",
+              actionState: "off",
+              title: reason || "schedulable=false，账号当前不参与调度。",
+              rawSchedulable: schedulable,
+            };
+          }
+
+          if (statusMeta.isActive && schedulable === true) {
+            return {
+              label: "调度中",
+              chipLabel: "调度中",
+              state: "safe",
+              action: "disable",
+              actionLabel: "关闭调度",
+              actionState: "on",
+              title: "账号状态 active 且 schedulable=true，当前参与调度。",
+              rawSchedulable: schedulable,
+            };
+          }
+
+          if (statusMeta.isActive) {
+            return {
+              label: "已启用",
+              chipLabel: "调度状态未知",
+              state: "neutral",
+              action: "disable",
+              actionLabel: "关闭调度",
+              actionState: "on",
+              title: "账号 active，但返回数据没有明确 schedulable 字段。",
+              rawSchedulable: schedulable,
+            };
+          }
+
+          return {
+            label: statusMeta.label,
+            chipLabel: statusMeta.label,
+            state: "neutral",
+            action: "enable",
+            actionLabel: "启用账号",
+            actionState: "off",
+            title: "账号未处于可调度状态。",
+            rawSchedulable: schedulable,
+          };
+        }
+
+        function getScheduleToggleMeta(display) {
+          if (!display.statusMeta?.isActive) {
+            return null;
+          }
+          const schedule = display.schedule || {};
+          const isOn = schedule.action !== "enable";
+          return {
+            action: isOn ? "stop-schedule" : "start-schedule",
+            label: "调度",
+            state: isOn ? "on" : "off",
+            tone: isOn ? "switch-on" : "switch-off",
+            title: isOn ? "当前参与调度；点击关闭调度。" : "当前不参与调度；点击启动调度。",
+          };
+        }
+
+        function getAccountToggleMeta(display) {
+          const statusMeta = display.statusMeta || {};
+          if (statusMeta.isActive) {
+            return {
+              action: "disable-account",
+              label: "启用",
+              state: "on",
+              tone: "switch-on",
+              title: "当前账号已启用；点击后禁用账号并关闭调度。",
+            };
+          }
+          return {
+            action: "enable-account",
+            label: "启用",
+            state: "off",
+            tone: statusMeta.isError ? "switch-error" : "switch-off",
+            title: statusMeta.isError
+              ? "当前账号为错误状态；点击后设为 active 并启动调度，不刷新或修复账号凭证。"
+              : "当前账号未启用；点击后设为 active 并启动调度。",
+          };
+        }
+
+        function getConcurrencyMeta(value) {
+          const text = firstNonEmptyText(value);
+          const match = text.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
+          if (!match) {
+            return { state: "neutral", label: text || "-" };
+          }
+          const current = Number(match[1]);
+          const limit = Number(match[2]);
+          if (!Number.isFinite(current) || !Number.isFinite(limit) || limit <= 0) {
+            return { state: "neutral", label: text || "-" };
+          }
+          const ratio = current / limit;
+          return {
+            state: ratio >= 1 ? "danger" : ratio >= 0.75 ? "warning" : "safe",
+            label: text,
+          };
+        }
+
+        function getExpiryMeta(value) {
+          const normalized = normalizeDisplayTimestamp(value);
+          if (!normalized) {
+            return { state: "neutral", label: "-", title: "未设置过期时间" };
+          }
+
+          const time = new Date(normalized).getTime();
+          if (Number.isNaN(time)) {
+            return { state: "neutral", label: formatDisplayDate(value) || "-", title: "无法解析过期时间" };
+          }
+
+          const remainingMs = time - Date.now();
+          const soonMs = 3 * 24 * 60 * 60 * 1000;
+          return {
+            state: remainingMs < 0 ? "danger" : remainingMs <= soonMs ? "warning" : "safe",
+            label: formatDisplayDate(normalized) || "-",
+            title: normalized,
+          };
+        }
+
+        function renderGroupCards(labels) {
+          const items = Array.isArray(labels) && labels.length ? labels : ["未绑定"];
+          const className = labels.length ? "server-group-card" : "server-group-card is-empty";
+          return items.map((label) => `<span class="${className}" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`).join("");
+        }
+
+        function getServerAccountDisplay(account) {
+          const record = getServerAccountRecord(account);
+          const credentials = isPlainObject(record.credentials) ? record.credentials : {};
+          const extra = isPlainObject(record.extra) ? record.extra : {};
+          const id = getServerAccountId(record);
+          const email = firstNonEmptyText(record.email, credentials.email, extra.email);
+          const name = firstNonEmptyText(record.name, record.display_name, record.displayName, email, credentials.chatgpt_account_id, id);
+          const expiresAt = firstDisplayTimestamp(
+            record.expires_at,
+            record.expiresAt,
+            credentials.expires_at,
+            credentials.expiresAt,
+            credentials.exp,
+          );
+          const updatedAt = firstDisplayTimestamp(record.updated_at, record.updatedAt);
+          const createdAt = firstDisplayTimestamp(record.created_at, record.createdAt);
+          const lastUsedAt = firstDisplayTimestamp(record.last_used_at, record.lastUsedAt);
+          const status = firstNonEmptyText(
+            record.status,
+            record.state,
+            record.disabled === true ? "disabled" : record.disabled === false ? "active" : "",
+          );
+          const statusMeta = getAccountStatusMeta(status);
+          const scheduleMeta = getScheduleMeta(record, statusMeta);
+          const platform = firstNonEmptyText(record.platform, extra.platform);
+          const type = firstNonEmptyText(record.type, record.account_type, record.accountType);
+          const entitlement = isPlainObject(record.entitlement) ? record.entitlement : {};
+          const planType = firstNonEmptyText(
+            credentials.plan_type,
+            credentials.planType,
+            credentials.chatgpt_plan_type,
+            credentials.chatgptPlanType,
+            credentials.subscription_plan,
+            credentials.subscriptionPlan,
+            extra.plan_type,
+            extra.planType,
+            extra.chatgpt_plan_type,
+            extra.chatgptPlanType,
+            extra.subscription_plan,
+            extra.subscriptionPlan,
+            record.plan_type,
+            record.planType,
+            record.chatgpt_plan_type,
+            record.chatgptPlanType,
+            record.subscription_plan,
+            record.subscriptionPlan,
+            entitlement.subscription_plan,
+            entitlement.subscriptionPlan,
+          );
+          const privacyMode = firstNonEmptyText(
+            extra.privacy_mode,
+            extra.privacyMode,
+            record.privacy_mode,
+            record.privacyMode,
+            record.privacy,
+          );
+          const groupLabels = getGroupLabels(record);
+          const groupText = groupLabels.length ? groupLabels.join("、") : "未绑定";
+          const proxyText = getProxyLabel(record);
+          const maxConcurrency = firstNonEmptyText(record.concurrency);
+          const currentConcurrency = firstNonEmptyText(record.current_concurrency, record.currentConcurrency);
+          const concurrency = currentConcurrency && maxConcurrency ? `${currentConcurrency} / ${maxConcurrency}` : (maxConcurrency || currentConcurrency);
+          const priority = firstNonEmptyText(record.priority);
+          const rateMultiplier = firstNonEmptyText(record.rate_multiplier, record.rateMultiplier);
+          const schedulable = scheduleMeta.chipLabel || "";
+
+          return {
+            id,
+            name,
+            email,
+            expiresAt,
+            updatedAt,
+            createdAt,
+            lastUsedAt,
+            status,
+            statusMeta,
+            schedule: scheduleMeta,
+            platform,
+            type,
+            planType,
+            privacyMode,
+            groupLabels,
+            groupText,
+            proxyText,
+            concurrency,
+            priority,
+            rateMultiplier,
+            schedulable,
+          };
+        }
+
+        function getFilteredServerAccounts() {
+          const keyword = String(state.serverAccountSearch || "").trim().toLowerCase();
+          if (!keyword) {
+            return state.serverAccounts;
+          }
+          return state.serverAccounts.filter((account) => {
+            const display = getServerAccountDisplay(account);
+            const haystack = [
+              display.id,
+              display.name,
+              display.email,
+              display.platform,
+              display.type,
+              display.status,
+              display.privacyMode,
+              display.planType,
+              display.groupText,
+              display.proxyText,
+              display.schedulable,
+            ].join(" ").toLowerCase();
+            return haystack.includes(keyword);
+          });
+        }
+
+        function setSelectedServerAccounts(ids) {
+          const available = new Set(state.serverAccounts.map((account) => getServerAccountId(account)).filter(Boolean));
+          const seen = new Set();
+          state.selectedServerAccountIds = (Array.isArray(ids) ? ids : [])
+            .map((id) => String(id ?? "").trim())
+            .filter((id) => id && available.has(id))
+            .filter((id) => {
+              if (seen.has(id)) {
+                return false;
+              }
+              seen.add(id);
+              return true;
+            });
+          renderServerAccounts();
+        }
+
+        function renderServerAccountSelectionSummary(filteredAccounts = getFilteredServerAccounts()) {
+          const selectedCount = state.selectedServerAccountIds.length;
+          const visibleCount = filteredAccounts.length;
+          elements.serverAccountSelectionSummary.textContent = selectedCount
+            ? `已选择 ${selectedCount} 个账号；当前筛选显示 ${visibleCount} / ${state.serverAccounts.length} 个。`
+            : `未选择账号；当前显示 ${visibleCount} / ${state.serverAccounts.length} 个。`;
+          const visibleIds = filteredAccounts.map((account) => getServerAccountId(account)).filter(Boolean);
+          const selectedSet = new Set(state.selectedServerAccountIds);
+          const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedSet.has(id));
+          elements.toggleVisibleServerAccountSelection.textContent = allVisibleSelected ? "清空选择" : "全选可见";
+          elements.toggleVisibleServerAccountSelection.dataset.selectionMode = allVisibleSelected ? "clear" : "select";
+          elements.toggleVisibleServerAccountSelection.disabled = visibleIds.length === 0 && selectedCount === 0;
+          [
+            elements.applySelectedServerAccountSettings,
+            elements.enableSelectedServerAccounts,
+            elements.disableSelectedServerAccounts,
+            elements.startSelectedServerAccountSchedule,
+            elements.stopSelectedServerAccountSchedule,
+            elements.privacySelectedServerAccounts,
+          ].forEach((button) => {
+            button.disabled = selectedCount === 0;
+          });
         }
 
         function renderServerAccounts() {
+          const availableIds = new Set(state.serverAccounts.map((account) => getServerAccountId(account)).filter(Boolean));
+          state.selectedServerAccountIds = state.selectedServerAccountIds.filter((id) => availableIds.has(id));
+          const filteredAccounts = getFilteredServerAccounts();
+          const selectedSet = new Set(state.selectedServerAccountIds);
+
+          renderServerAccountSelectionSummary(filteredAccounts);
+
           if (!state.serverAccounts.length) {
-            elements.serverAccountBody.innerHTML = '<tr><td colspan="4" class="empty">暂无服务器账号数据。</td></tr>';
+            elements.serverAccountBody.innerHTML = '<div class="server-account-empty">暂无服务器账号数据。</div>';
             return;
           }
 
-          elements.serverAccountBody.innerHTML = state.serverAccounts.map((account) => {
+          if (!filteredAccounts.length) {
+            elements.serverAccountBody.innerHTML = '<div class="server-account-empty">没有匹配的服务器账号。</div>';
+            return;
+          }
+
+          elements.serverAccountBody.innerHTML = filteredAccounts.map((account) => {
             const display = getServerAccountDisplay(account);
+            const id = display.id;
+            const selected = selectedSet.has(id);
+            const statusClass = `status-badge schedule-badge schedule-${display.schedule?.state || "neutral"}`;
+            const privacyMeta = getPrivacyMeta(display.privacyMode, display);
+            const planMeta = getPlanTypeMeta(display.planType, display);
+            const concurrencyMeta = getConcurrencyMeta(display.concurrency);
+            const expiryMeta = getExpiryMeta(display.expiresAt);
+            const scheduleToggleMeta = getScheduleToggleMeta(display);
+            const accountToggleMeta = getAccountToggleMeta(display);
             return `
-              <tr>
-                <td><div class="cell-clip" title="${escapeHtml(display.name)}">${escapeHtml(display.name || "-")}</div></td>
-                <td><div class="cell-clip" title="${escapeHtml(display.email)}">${escapeHtml(display.email || "-")}</div></td>
-                <td><div class="cell-clip" title="${escapeHtml(display.expiresAt)}">${escapeHtml(formatDisplayDate(display.expiresAt) || "-")}</div></td>
-                <td><div class="cell-clip" title="${escapeHtml(display.status)}">${escapeHtml(display.status || "-")}</div></td>
-              </tr>
+              <article class="server-account-card-row ${selected ? "is-selected" : ""}" role="listitem">
+                <label class="server-card-check" aria-label="选择 ${escapeHtml(display.name || id || "账号")}">
+                  <input type="checkbox" data-server-account-id="${escapeHtml(id)}" ${selected ? "checked" : ""} />
+                </label>
+                <div class="server-card-content">
+                  <div class="server-card-headline">
+                    <div class="server-card-identity">
+                      <div class="server-account-title-row">
+                        <div class="cell-clip strong-cell server-account-name" title="${escapeHtml(display.name)}">${escapeHtml(display.name || "-")}</div>
+                        <span class="${escapeHtml(statusClass)}" title="${escapeHtml(display.schedule?.title || display.status || "")}">${escapeHtml(display.schedule?.label || display.statusMeta?.label || "-")}</span>
+                      </div>
+                      <div class="cell-clip server-account-email" title="${escapeHtml(display.email)}">${escapeHtml(display.email || "-")}</div>
+                      <div class="server-chip-row">
+                        <span class="server-chip">ID ${escapeHtml(id || "-")}</span>
+                        <span class="server-chip">${escapeHtml(display.platform || "-")}</span>
+                        <span class="server-chip">${escapeHtml(display.type || "-")}</span>
+                        ${planMeta.visible ? `<span class="server-chip plan-chip plan-${escapeHtml(planMeta.state)}" title="${escapeHtml(planMeta.title)}">${escapeHtml(planMeta.label)}</span>` : ""}
+                        <span class="server-chip account-status-chip account-status-${escapeHtml(display.statusMeta?.state || "unknown")}" title="sub2api status: ${escapeHtml(display.status || "-")}">账号：${escapeHtml(display.statusMeta?.label || display.status || "-")}</span>
+                        <span class="server-chip privacy-chip privacy-${escapeHtml(privacyMeta.state)}" title="${escapeHtml(privacyMeta.title)}">${escapeHtml(privacyMeta.label)}</span>
+                      </div>
+                    </div>
+                    <div class="server-card-actions" aria-label="账号操作">
+                      <button
+                        class="tiny-button server-switch action-toggle action-toggle-${escapeHtml(accountToggleMeta.tone || "neutral")}"
+                        type="button"
+                        data-server-action="${escapeHtml(accountToggleMeta.action)}"
+                        data-server-account-id="${escapeHtml(id)}"
+                        aria-pressed="${accountToggleMeta.state === "on" ? "true" : "false"}"
+                        title="${escapeHtml(accountToggleMeta.title)}"
+                      >
+                        <span class="server-switch-label">${escapeHtml(accountToggleMeta.label)}</span>
+                        <span class="server-switch-track" aria-hidden="true"><span class="server-switch-thumb"></span></span>
+                      </button>
+                      ${scheduleToggleMeta ? `<button
+                        class="tiny-button server-switch action-toggle action-toggle-${escapeHtml(scheduleToggleMeta.tone || "neutral")}"
+                        type="button"
+                        data-server-action="${escapeHtml(scheduleToggleMeta.action)}"
+                        data-server-account-id="${escapeHtml(id)}"
+                        aria-pressed="${scheduleToggleMeta.state === "on" ? "true" : "false"}"
+                        title="${escapeHtml(scheduleToggleMeta.title)}"
+                      >
+                        <span class="server-switch-label">${escapeHtml(scheduleToggleMeta.label)}</span>
+                        <span class="server-switch-track" aria-hidden="true"><span class="server-switch-thumb"></span></span>
+                      </button>` : ""}
+                      <button class="tiny-button server-action-primary" type="button" data-server-action="apply-settings" data-server-account-id="${escapeHtml(id)}">应用参数</button>
+                      <button
+                        class="tiny-button server-action-toggle privacy-toggle privacy-toggle-${escapeHtml(privacyMeta.state)}"
+                        type="button"
+                        ${privacyMeta.actionDisabled ? "disabled" : `data-server-action="set-privacy" data-server-account-id="${escapeHtml(id)}"`}
+                        aria-pressed="${privacyMeta.actionDisabled ? "true" : "false"}"
+                        title="${escapeHtml(privacyMeta.title)}"
+                      >${escapeHtml(privacyMeta.actionLabel)}</button>
+                    </div>
+                  </div>
+
+                  <div class="server-card-details">
+                    <section class="server-info-panel server-binding-panel" aria-label="绑定">
+                      <div class="server-panel-title">绑定</div>
+                      <div class="server-kv server-kv-groups">
+                        <span>分组</span>
+                        <div class="server-group-card-list" title="${escapeHtml(display.groupText)}">${renderGroupCards(display.groupLabels || [])}</div>
+                      </div>
+                      <div class="server-kv">
+                        <span>代理</span>
+                        <strong title="${escapeHtml(display.proxyText)}">${escapeHtml(display.proxyText)}</strong>
+                      </div>
+                    </section>
+
+                    <section class="server-info-panel" aria-label="运行">
+                      <div class="server-panel-title">运行</div>
+                      <div class="server-inline-metrics">
+                        <div class="server-metric metric-${escapeHtml(concurrencyMeta.state)}"><span>并发</span><strong>${escapeHtml(concurrencyMeta.label || "-")}</strong></div>
+                        <div class="server-metric"><span>优先级</span><strong>${escapeHtml(display.priority || "-")}</strong></div>
+                        <div class="server-metric"><span>倍率</span><strong>${escapeHtml(display.rateMultiplier || "-")}</strong></div>
+                      </div>
+                    </section>
+
+                    <section class="server-info-panel server-time-panel" aria-label="时间">
+                      <div class="server-panel-title">时间</div>
+                      <div class="server-time-grid">
+                        <div class="server-date-item date-${escapeHtml(expiryMeta.state)}"><span>过期</span><strong title="${escapeHtml(expiryMeta.title || display.expiresAt)}">${escapeHtml(expiryMeta.label || "-")}</strong></div>
+                        <div class="server-date-item"><span>创建</span><strong title="${escapeHtml(display.createdAt)}">${escapeHtml(formatDisplayDate(display.createdAt) || "-")}</strong></div>
+                        <div class="server-date-item"><span>更新</span><strong title="${escapeHtml(display.updatedAt)}">${escapeHtml(formatDisplayDate(display.updatedAt) || "-")}</strong></div>
+                        <div class="server-date-item"><span>使用</span><strong title="${escapeHtml(display.lastUsedAt)}">${escapeHtml(formatDisplayDate(display.lastUsedAt) || "-")}</strong></div>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </article>
             `;
           }).join("");
         }
@@ -2165,12 +2883,40 @@
         function toRuntimeServerAccountCache(accounts) {
           return accounts.map((account) => {
             const display = getServerAccountDisplay(account);
+            const record = getServerAccountRecord(account);
+            const optionalFields = {};
+            [
+              "schedulable",
+              "temp_unschedulable_reason",
+              "temp_unschedulable_until",
+              "rate_limited_at",
+              "rate_limit_reset_at",
+              "overload_until",
+              "error_message",
+            ].forEach((key) => {
+              if (Object.prototype.hasOwnProperty.call(record, key) && record[key] !== undefined && record[key] !== null && record[key] !== "") {
+                optionalFields[key] = record[key];
+              }
+            });
             return {
-              id: String(account?.id ?? account?.account_id ?? account?.accountId ?? account?.uuid ?? "").trim(),
+              id: display.id,
               name: display.name || "",
               email: display.email || "",
-              expires_at: display.expiresAt || "",
+              platform: display.platform || "",
+              type: display.type || "",
+              plan_type: display.planType || "",
               status: display.status || "",
+              privacy_mode: display.privacyMode || "",
+              groups: display.groupText || "",
+              proxy: display.proxyText || "",
+              concurrency: display.concurrency || "",
+              priority: display.priority || "",
+              rate_multiplier: display.rateMultiplier || "",
+              expires_at: display.expiresAt || "",
+              created_at: display.createdAt || "",
+              updated_at: display.updatedAt || "",
+              last_used_at: display.lastUsedAt || "",
+              ...optionalFields,
             };
           }).filter((account) => account.id || account.name || account.email || account.expires_at || account.status);
         }
@@ -2312,6 +3058,13 @@
           });
         }
 
+        async function setSub2ApiAccountSchedulable(accountId, schedulable) {
+          await requestSub2ApiJson(getSub2ApiAdminUrl(`/admin/accounts/${encodeURIComponent(accountId)}/schedulable`), {
+            method: "POST",
+            body: JSON.stringify({ schedulable: Boolean(schedulable) }),
+          });
+        }
+
         async function applyPrivacyToAccounts(accountIds) {
           const stats = { success: 0, failed: 0 };
           if (!state.setPrivacy || !accountIds.length) {
@@ -2328,6 +3081,130 @@
           }
 
           return stats;
+        }
+
+        function getServerAccountById(accountId) {
+          const target = String(accountId ?? "").trim();
+          return state.serverAccounts.find((account) => getServerAccountId(account) === target);
+        }
+
+        function buildServerAccountSettingsPayload() {
+          const payload = {
+            concurrency: state.concurrency,
+            priority: state.priority,
+            rate_multiplier: state.rateMultiplier,
+            expires_at: state.expiresAtOverride,
+            auto_pause_on_expired: true,
+            group_ids: state.selectedGroups,
+            confirm_mixed_channel_risk: true,
+          };
+          const proxyId = getRandomSelectedProxyId();
+          if (proxyId !== undefined && proxyId !== null && proxyId !== "") {
+            payload.proxy_id = proxyId;
+          }
+          return stripUnavailable(payload) || {};
+        }
+
+        async function updateServerAccount(accountId, payload) {
+          return requestSub2ApiJson(getSub2ApiAdminUrl(`/admin/accounts/${encodeURIComponent(accountId)}`), {
+            method: "PUT",
+            body: JSON.stringify(payload),
+          });
+        }
+
+        function setServerAccountActionBusy(isBusy) {
+          [
+            elements.refreshServerAccounts,
+            elements.toggleVisibleServerAccountSelection,
+            elements.applySelectedServerAccountSettings,
+            elements.privacySelectedServerAccounts,
+            elements.startSelectedServerAccountSchedule,
+            elements.stopSelectedServerAccountSchedule,
+            elements.enableSelectedServerAccounts,
+            elements.disableSelectedServerAccounts,
+          ].forEach((button) => {
+            const elementId = button.id || String(button.selector || "").replace(/^#/, "");
+            const isSelectionUtility = elementId === "toggle-visible-server-account-selection";
+            button.disabled = isBusy || (button !== elements.refreshServerAccounts && state.selectedServerAccountIds.length === 0 && !isSelectionUtility);
+          });
+          const rowControls = typeof elements.serverAccountBody.querySelectorAll === "function"
+            ? Array.from(elements.serverAccountBody.querySelectorAll("button,input"))
+            : [];
+          rowControls.forEach((element) => {
+            element.disabled = isBusy;
+          });
+        }
+
+        async function runServerAccountOperation(accountIds, operation) {
+          const ids = (Array.isArray(accountIds) ? accountIds : [accountIds])
+            .map((id) => String(id ?? "").trim())
+            .filter(Boolean);
+          if (!ids.length) {
+            setStatus(elements.serverAccountStatus, "请先选择账号。", "error");
+            return;
+          }
+
+          const operationLabels = {
+            "apply-settings": "应用当前参数",
+            "set-privacy": "关闭 Privacy",
+            "start-schedule": "启动调度",
+            "stop-schedule": "关闭调度",
+            "enable-account": "启用账号",
+            "disable-account": "禁用账号",
+          };
+          let label = operationLabels[operation] || "操作";
+          if (["start-schedule", "stop-schedule", "enable-account", "disable-account"].includes(operation) && typeof window.confirm === "function") {
+            const ok = window.confirm(`${label} ${ids.length} 个账号？`);
+            if (!ok) {
+              return;
+            }
+          }
+
+          setServerAccountActionBusy(true);
+          let success = 0;
+          let failed = 0;
+          let skipped = 0;
+          setStatus(elements.serverAccountStatus, `正在${label} ${ids.length} 个账号...`, "ok");
+
+          for (const id of ids) {
+            try {
+              if (operation === "apply-settings") {
+                await updateServerAccount(id, buildServerAccountSettingsPayload());
+              } else if (operation === "set-privacy") {
+                const display = getServerAccountDisplay(getServerAccountById(id));
+                const privacyMeta = getPrivacyMeta(display.privacyMode, display);
+                if (!privacyMeta.applicable || privacyMeta.isOff) {
+                  skipped += 1;
+                  continue;
+                }
+                await setSub2ApiAccountPrivacy(id);
+              } else if (operation === "start-schedule") {
+                await setSub2ApiAccountSchedulable(id, true);
+              } else if (operation === "stop-schedule") {
+                await setSub2ApiAccountSchedulable(id, false);
+              } else if (operation === "enable-account") {
+                await updateServerAccount(id, { status: "active", confirm_mixed_channel_risk: true });
+                await setSub2ApiAccountSchedulable(id, true);
+              } else if (operation === "disable-account") {
+                await setSub2ApiAccountSchedulable(id, false);
+                await updateServerAccount(id, { status: "inactive", confirm_mixed_channel_risk: true });
+              } else {
+                throw new Error("未知操作");
+              }
+              success += 1;
+            } catch {
+              failed += 1;
+            }
+          }
+
+          const skippedText = skipped ? `，跳过 ${skipped}` : "";
+          setStatus(elements.serverAccountStatus, `${label}完成：成功 ${success}${skippedText}，失败 ${failed}。正在刷新列表...`, failed ? "error" : "ok");
+          try {
+            await refreshServerAccounts();
+          } finally {
+            setServerAccountActionBusy(false);
+            renderServerAccounts();
+          }
         }
 
         // 新增功能：异步拉取 sub2api 的分组和代理列表元数据并渲染选择器
@@ -2689,8 +3566,63 @@
 
         elements.fetchSub2apiMeta.addEventListener("click", fetchSub2ApiMeta);
         elements.refreshServerAccounts.addEventListener("click", refreshServerAccounts);
+        elements.serverAccountSearch.addEventListener("input", () => {
+          state.serverAccountSearch = elements.serverAccountSearch.value;
+          renderServerAccounts();
+        });
+        elements.toggleVisibleServerAccountSelection.addEventListener("click", () => {
+          const visibleIds = getFilteredServerAccounts().map((account) => getServerAccountId(account)).filter(Boolean);
+          if (elements.toggleVisibleServerAccountSelection.dataset.selectionMode === "clear") {
+            setSelectedServerAccounts([]);
+          } else {
+            setSelectedServerAccounts([...state.selectedServerAccountIds, ...visibleIds]);
+          }
+        });
+        elements.applySelectedServerAccountSettings.addEventListener("click", () => {
+          runServerAccountOperation(state.selectedServerAccountIds, "apply-settings");
+        });
+        elements.privacySelectedServerAccounts.addEventListener("click", () => {
+          runServerAccountOperation(state.selectedServerAccountIds, "set-privacy");
+        });
+        elements.startSelectedServerAccountSchedule.addEventListener("click", () => {
+          runServerAccountOperation(state.selectedServerAccountIds, "start-schedule");
+        });
+        elements.stopSelectedServerAccountSchedule.addEventListener("click", () => {
+          runServerAccountOperation(state.selectedServerAccountIds, "stop-schedule");
+        });
+        elements.enableSelectedServerAccounts.addEventListener("click", () => {
+          runServerAccountOperation(state.selectedServerAccountIds, "enable-account");
+        });
+        elements.disableSelectedServerAccounts.addEventListener("click", () => {
+          runServerAccountOperation(state.selectedServerAccountIds, "disable-account");
+        });
+        elements.serverAccountBody.addEventListener("change", (event) => {
+          const accountId = event.target?.dataset?.serverAccountId;
+          if (!accountId) {
+            return;
+          }
+          const selected = new Set(state.selectedServerAccountIds);
+          if (event.target.checked) {
+            selected.add(String(accountId));
+          } else {
+            selected.delete(String(accountId));
+          }
+          setSelectedServerAccounts(Array.from(selected));
+        });
+        elements.serverAccountBody.addEventListener("click", (event) => {
+          const actionTarget = typeof event.target?.closest === "function"
+            ? event.target.closest("[data-server-action][data-server-account-id]")
+            : event.target;
+          const action = actionTarget?.dataset?.serverAction;
+          const accountId = actionTarget?.dataset?.serverAccountId;
+          if (!action || !accountId || actionTarget?.disabled) {
+            return;
+          }
+          runServerAccountOperation([accountId], action);
+        });
         elements.saveSub2apiConfig.addEventListener("click", saveSub2ApiConfig);
         elements.saveTokenmanagerPassword.addEventListener("click", saveTokenManagerPassword);
+        elements.logoutButton.addEventListener("click", logoutTokenManager);
         elements.sub2apiTokenToggle.addEventListener("click", () => {
           const isVisible = elements.sub2apiToken.type === "text";
           elements.sub2apiToken.type = isVisible ? "password" : "text";

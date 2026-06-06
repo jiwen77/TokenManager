@@ -74,12 +74,117 @@ function firstDisplayValue(...values) {
     if (value === undefined || value === null || value === "") {
       continue;
     }
+    if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
+      continue;
+    }
     const text = String(value).trim();
     if (text) {
       return text;
     }
   }
   return "";
+}
+
+function uniqueDisplayLabels(values) {
+  const seen = new Set();
+  return values
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function splitDisplayLabels(value) {
+  return String(value || "")
+    .split(/[、,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function displayLabelFromGroup(group) {
+  if (!group || typeof group !== "object") {
+    return firstDisplayValue(group);
+  }
+
+  const nestedGroup = group.group && typeof group.group === "object" ? group.group : {};
+  const label = firstDisplayValue(
+    nestedGroup.name,
+    nestedGroup.label,
+    nestedGroup.title,
+    group.name,
+    group.label,
+    group.title,
+    group.group_name,
+    group.groupName,
+  );
+  if (label) {
+    return label;
+  }
+
+  const id = firstDisplayValue(group.group_id, group.groupId, nestedGroup.id, group.id);
+  return id ? `#${id}` : "";
+}
+
+function displayLabelsFromGroups(value) {
+  if (typeof value === "string" && value.trim()) {
+    return splitDisplayLabels(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(displayLabelFromGroup).filter(Boolean);
+  }
+  if (value && typeof value === "object") {
+    return [displayLabelFromGroup(value)].filter(Boolean);
+  }
+  return [];
+}
+
+function displayLabelsFromIds(value) {
+  const items = Array.isArray(value) ? value : value === undefined || value === null || value === "" ? [] : [value];
+  return items
+    .map((item) => {
+      const id = firstDisplayValue(item);
+      return id ? `#${id}` : "";
+    })
+    .filter(Boolean);
+}
+
+function firstTimestampDisplayValue(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    if (typeof value === "number" || (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim()))) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0) {
+        continue;
+      }
+      return String(value).trim();
+    }
+    const text = firstDisplayValue(value);
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function displayProxyLabel(item, proxy) {
+  if (typeof item.proxy === "string" && item.proxy.trim() && item.proxy.trim() !== "[object Object]") {
+    return item.proxy.trim();
+  }
+
+  const proxyId = firstDisplayValue(item.proxy_id, item.proxyId, proxy.id);
+  const proxyName = firstDisplayValue(item.proxy_name, item.proxyName, proxy.name, proxy.label, proxy.title);
+  if (proxyName && proxyId) {
+    return `${proxyName} (#${proxyId})`;
+  }
+  return proxyName || (proxyId ? `#${proxyId}` : "");
 }
 
 function normalizeServerAccountCache(value) {
@@ -96,15 +201,45 @@ function normalizeServerAccountCache(value) {
 
       const credentials = item.credentials && typeof item.credentials === "object" ? item.credentials : {};
       const extra = item.extra && typeof item.extra === "object" ? item.extra : {};
+      const proxy = item.proxy && typeof item.proxy === "object" ? item.proxy : {};
+      const entitlement = item.entitlement && typeof item.entitlement === "object" ? item.entitlement : {};
       const id = firstDisplayValue(item.id, item.account_id, item.accountId, item.uuid);
       const email = firstDisplayValue(item.email, credentials.email, extra.email);
       const name = firstDisplayValue(item.name, item.display_name, item.displayName, email, credentials.chatgpt_account_id, id);
-      const expiresAt = firstDisplayValue(item.expires_at, item.expiresAt, credentials.expires_at, credentials.expiresAt);
+      const expiresAt = firstTimestampDisplayValue(item.expires_at, item.expiresAt, credentials.expires_at, credentials.expiresAt, credentials.exp);
       const status = firstDisplayValue(
         item.status,
         item.state,
         item.disabled === true ? "disabled" : item.disabled === false ? "active" : "",
       );
+      const namedGroups = uniqueDisplayLabels([
+        ...displayLabelsFromGroups(item.groups),
+        ...displayLabelsFromGroups(item.account_groups),
+        ...displayLabelsFromGroups(item.accountGroups),
+        ...displayLabelsFromGroups(item.group_names),
+        ...displayLabelsFromGroups(item.groupNames),
+      ]);
+      const groups = (namedGroups.length ? namedGroups : uniqueDisplayLabels([
+        ...displayLabelsFromIds(item.group_ids),
+        ...displayLabelsFromIds(item.groupIds),
+      ])).join("、");
+      const proxyLabel = displayProxyLabel(item, proxy);
+      const maxConcurrency = firstDisplayValue(item.concurrency);
+      const currentConcurrency = firstDisplayValue(item.current_concurrency, item.currentConcurrency);
+      const optionalFields = {};
+      [
+        "schedulable",
+        "temp_unschedulable_reason",
+        "temp_unschedulable_until",
+        "rate_limited_at",
+        "rate_limit_reset_at",
+        "overload_until",
+        "error_message",
+      ].forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(item, key) && item[key] !== undefined && item[key] !== null && item[key] !== "") {
+          optionalFields[key] = item[key];
+        }
+      });
 
       if (!id && !name && !email && !expiresAt && !status) {
         return null;
@@ -114,8 +249,42 @@ function normalizeServerAccountCache(value) {
         id,
         name,
         email,
-        expires_at: expiresAt,
+        platform: firstDisplayValue(item.platform, extra.platform),
+        type: firstDisplayValue(item.type, item.account_type, item.accountType),
+        plan_type: firstDisplayValue(
+          credentials.plan_type,
+          credentials.planType,
+          credentials.chatgpt_plan_type,
+          credentials.chatgptPlanType,
+          credentials.subscription_plan,
+          credentials.subscriptionPlan,
+          extra.plan_type,
+          extra.planType,
+          extra.chatgpt_plan_type,
+          extra.chatgptPlanType,
+          extra.subscription_plan,
+          extra.subscriptionPlan,
+          item.plan_type,
+          item.planType,
+          item.chatgpt_plan_type,
+          item.chatgptPlanType,
+          item.subscription_plan,
+          item.subscriptionPlan,
+          entitlement.subscription_plan,
+          entitlement.subscriptionPlan,
+        ),
         status,
+        privacy_mode: firstDisplayValue(extra.privacy_mode, extra.privacyMode, item.privacy_mode, item.privacyMode),
+        groups,
+        proxy: proxyLabel,
+        concurrency: currentConcurrency && maxConcurrency ? `${currentConcurrency} / ${maxConcurrency}` : (maxConcurrency || currentConcurrency),
+        priority: firstDisplayValue(item.priority),
+        rate_multiplier: firstDisplayValue(item.rate_multiplier, item.rateMultiplier),
+        expires_at: expiresAt,
+        created_at: firstTimestampDisplayValue(item.created_at, item.createdAt),
+        updated_at: firstTimestampDisplayValue(item.updated_at, item.updatedAt),
+        last_used_at: firstTimestampDisplayValue(item.last_used_at, item.lastUsedAt),
+        ...optionalFields,
       };
     })
     .filter(Boolean);

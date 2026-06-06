@@ -3,6 +3,8 @@
 # Local secrets and session exports
 .env
 .env.*
+!.env.example
+!server/.env.example
 *.session.json
 session*.json
 sessions*.json

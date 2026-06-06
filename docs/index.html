@@ -6,7 +6,7 @@
     <title>ChatGPT Session -> CPA / sub2api / Cockpit / Codex / AxonHub / Codex-Manager</title>
     <meta name="theme-color" content="#24505a" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" sizes="any" />
-    <link rel="stylesheet" href="./styles.css?v=20260606-upsert-privacy" />
+    <link rel="stylesheet" href="./styles.css?v=20260607-account-inactive-status" />
 
   </head>
   <body>
@@ -27,8 +27,9 @@
         </div>
         <div class="meta-row" aria-label="处理方式">
           <span class="meta-chip">浏览器本地解析</span>
-          <span class="meta-chip">可导入私有 sub2api</span>
+          <span class="meta-chip">可导入 sub2api</span>
           <span class="meta-chip">服务器持久化</span>
+          <button class="meta-chip logout-button" id="logout-button" type="button" hidden>退出登录</button>
           <a
             class="meta-chip github-link"
             href="https://github.com/jiwen77/TokenManager"
@@ -147,11 +148,12 @@
             </div>
             <div class="issues" id="issues"></div>
             <textarea id="output" readonly spellcheck="false" placeholder="转换后会显示 JSON。"></textarea>
-            <div class="output-import-actions" id="output-import-actions">
-              <button class="button button-accent" id="import-sub2api" type="button" disabled>导入到 sub2api</button>
-              <span class="output-import-help">仅 sub2api 输出可用；重复账号会更新已有账号。</span>
+            <div class="output-footer">
+              <div class="status-line" id="output-status">暂无输出。</div>
+              <div class="output-import-actions" id="output-import-actions">
+                <button class="button button-accent" id="import-sub2api" type="button" disabled>导入到 sub2api</button>
+              </div>
             </div>
-            <div class="status-line" id="output-status">暂无输出。</div>
           </div>
         </section>
       </section>
@@ -325,33 +327,27 @@
             <div class="server-accounts-head">
               <div>
                 <h3 class="server-accounts-title" id="server-accounts-title">服务器已保存账号</h3>
-                <p class="server-accounts-help">数据来自 sub2api/PostgreSQL；刷新页面后仍会保存在服务器。</p>
+                <p class="server-accounts-help">搜索、勾选、批量更新 sub2api 账号。</p>
               </div>
               <button class="button button-secondary" id="refresh-server-accounts" type="button">刷新服务器账号</button>
             </div>
             <div class="status-line server-accounts-status" id="server-account-status">填写 Bearer Token 后可刷新服务器账号列表。</div>
-            <div class="accounts server-accounts-table" aria-label="服务器账号列表">
-              <table>
-                <colgroup>
-                  <col class="col-name" />
-                  <col class="col-email" />
-                  <col class="col-expiry" />
-                  <col class="col-type" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>名称</th>
-                    <th>邮箱</th>
-                    <th>过期时间</th>
-                    <th>状态</th>
-                  </tr>
-                </thead>
-                <tbody id="server-account-body">
-                  <tr>
-                    <td colspan="4" class="empty">暂无服务器账号数据。</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div class="server-accounts-toolbar" aria-label="服务器账号操作">
+              <label class="sr-only" for="server-account-search">搜索服务器账号</label>
+              <input id="server-account-search" class="server-account-search" type="search" placeholder="搜索名称 / 邮箱 / ID / 分组 / 代理" autocomplete="off" spellcheck="false" />
+              <div class="server-account-actions">
+                <button class="tiny-button server-selection-toggle" id="toggle-visible-server-account-selection" type="button">全选可见</button>
+                <button class="tiny-button server-bulk-action server-bulk-apply" id="apply-selected-server-account-settings" type="button" disabled>应用当前参数</button>
+                <button class="tiny-button server-bulk-action server-bulk-enable" id="enable-selected-server-accounts" type="button" disabled>启用账号</button>
+                <button class="tiny-button server-bulk-action server-bulk-disable" id="disable-selected-server-accounts" type="button" disabled>禁用账号</button>
+                <button class="tiny-button server-bulk-action server-bulk-start" id="start-selected-server-account-schedule" type="button" disabled>启动调度</button>
+                <button class="tiny-button server-bulk-action server-bulk-stop" id="stop-selected-server-account-schedule" type="button" disabled>关闭调度</button>
+                <button class="tiny-button server-bulk-action server-bulk-privacy" id="privacy-selected-server-accounts" type="button" disabled>设置 privacy</button>
+              </div>
+            </div>
+            <div class="server-selection-summary" id="server-account-selection-summary">未选择账号。</div>
+            <div class="server-account-list" id="server-account-body" role="list" aria-label="服务器账号列表">
+              <div class="server-account-empty">暂无服务器账号数据。</div>
             </div>
           </section>
 
@@ -377,7 +373,7 @@
                 <input id="tokenmanager-confirm-password" type="password" placeholder="再次输入新密码" autocomplete="new-password" />
               </div>
             </div>
-            <div class="actions" style="margin-top: 10px; justify-content: flex-start;">
+            <div class="actions settings-actions">
               <button class="button button-primary" id="save-tokenmanager-password" type="button">保存登录密码</button>
             </div>
             <div class="status-line" id="tokenmanager-password-status">修改后立即生效；当前已登录会话会继续保留。</div>
@@ -386,7 +382,7 @@
       </section>
     </main>
 
-    <script src="./app.js?v=20260606-upsert-privacy"></script>
+    <script src="./app.js?v=20260607-account-inactive-status"></script>
 
   </body>
 </html>

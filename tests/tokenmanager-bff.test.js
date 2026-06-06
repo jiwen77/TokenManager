@@ -8,6 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
 const { RuntimeConfigStore, createSub2ApiBrowserDefaults, createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, updateEnvFileText, verifyPasswordHash } = require("../server/tokenmanager-bff");
+const { normalizeServerAccountCache } = require("../server/lib/runtime-config-store");
 
 function listen(server) {
   return new Promise((resolve) => {
@@ -51,6 +52,9 @@ async function startBff(configOverrides = {}, sub2apiBaseUrl) {
     cookieSecure: true,
     cookieSameSite: "Lax",
     cookiePath: "/",
+    loginMaxFailures: 5,
+    loginWindowSeconds: 900,
+    loginLockSeconds: 900,
     maxBodyBytes: 1024 * 1024,
     upstreamTimeoutMs: 5000,
     sub2apiBrowserDefaults: { origin: "", adminBasePath: "/api/v1", apiBasePath: "/api/v1", importPath: "/api/v1/admin/accounts/data", defaultUrl: "" },
@@ -112,6 +116,58 @@ test("updateEnvFileText replaces or appends login password hash", () => {
   assert.equal(appended.endsWith("\n"), true);
 });
 
+test("server account cache normalization preserves sub2api account fields", () => {
+  assert.deepEqual(normalizeServerAccountCache([{
+    id: 127,
+    name: "beailcgggw@teamtc.lol",
+    platform: "openai",
+    type: "oauth",
+    credentials: {
+      email: "beailcgggw@teamtc.lol",
+      plan_type: "team",
+      refresh_token: "must-not-be-persisted",
+    },
+    extra: {
+      privacy_mode: "enabled",
+      openai_passthrough: true,
+    },
+    proxy_id: 7,
+    proxy: { id: 7, name: "1024Proxy LA" },
+    concurrency: 2,
+    current_concurrency: 0,
+    priority: 2,
+    rate_multiplier: 1,
+    status: "active",
+    expires_at: 1781580950,
+    last_used_at: 0,
+    created_at: "2026-06-06T23:17:41.474312+08:00",
+    updated_at: "2026-06-06T23:20:53.473457+08:00",
+    account_groups: [
+      { group_id: 5, priority: 1, group: { id: 5, name: "Codex额度" } },
+      { group_id: 2, priority: 2, group: { id: 2, name: "Codex" } },
+    ],
+    group_ids: [5, 2],
+  }]), [{
+    id: "127",
+    name: "beailcgggw@teamtc.lol",
+    email: "beailcgggw@teamtc.lol",
+    platform: "openai",
+    type: "oauth",
+    plan_type: "team",
+    status: "active",
+    privacy_mode: "enabled",
+    groups: "Codex额度、Codex",
+    proxy: "1024Proxy LA (#7)",
+    concurrency: "0 / 2",
+    priority: "2",
+    rate_multiplier: "1",
+    expires_at: "1781580950",
+    created_at: "2026-06-06T23:17:41.474312+08:00",
+    updated_at: "2026-06-06T23:20:53.473457+08:00",
+    last_used_at: "",
+  }]);
+});
+
 test("browser-facing sub2api defaults keep server origin separate from API paths", () => {
   assert.deepEqual(createSub2ApiBrowserDefaults({}), {
     origin: "",
@@ -167,6 +223,22 @@ test("unauthenticated proxy calls are rejected before sub2api is contacted", asy
   }
 });
 
+test("malformed cookie values do not crash authentication checks", async () => {
+  const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());
+  const bff = await startBff({ authOnly: true, sub2apiAdminEmail: "", sub2apiAdminPassword: "" }, mock.baseUrl);
+
+  try {
+    const checked = await fetchJson(`${bff.baseUrl}/token-manager-auth/config`, {
+      headers: { Cookie: "tokenmanager-session=%E0%A4%A" },
+    });
+    assert.equal(checked.response.status, 401);
+    assert.equal(checked.body.error, "not_authenticated");
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
 
 test("page gate shows an in-page password form and needs no username", async () => {
   const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());
@@ -176,8 +248,12 @@ test("page gate shows an in-page password form and needs no username", async () 
     const gate = await fetchText(`${bff.baseUrl}/token-manager-auth/check`);
     assert.equal(gate.response.status, 401);
     assert.match(gate.response.headers.get("content-type") || "", /text\/html/);
-    assert.match(gate.body, /TokenManager 访问密码/);
-    assert.match(gate.body, /无需用户名/);
+    assert.doesNotMatch(gate.response.headers.get("content-security-policy") || "", /unsafe-inline/);
+    assert.match(gate.response.headers.get("content-security-policy") || "", /script-src 'self' 'nonce-[^']+'/);
+    assert.match(gate.body, /<script nonce="/);
+    assert.match(gate.body, /<style nonce="/);
+    assert.match(gate.body, /<h1>TokenManager<\/h1>/);
+    assert.doesNotMatch(gate.body, /无需用户名/);
     assert.doesNotMatch(gate.body, /name=["']username["']/);
     assert.equal(gate.response.headers.has("www-authenticate"), false);
 
@@ -194,6 +270,136 @@ test("page gate shows an in-page password form and needs no username", async () 
     });
     assert.equal(allowed.response.status, 204);
     assert.equal(allowed.body, "");
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("login rate limiter locks repeated failed attempts and rejects even a correct password while locked", async () => {
+  const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());
+  const bff = await startBff({
+    authOnly: true,
+    sub2apiAdminEmail: "",
+    sub2apiAdminPassword: "",
+    loginMaxFailures: 2,
+    loginWindowSeconds: 60,
+    loginLockSeconds: 60,
+  }, mock.baseUrl);
+
+  try {
+    const badOne = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.5" },
+      body: JSON.stringify({ password: "wrong-one" }),
+    });
+    assert.equal(badOne.response.status, 401);
+
+    const badTwo = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.5" },
+      body: JSON.stringify({ password: "wrong-two" }),
+    });
+    assert.equal(badTwo.response.status, 429);
+    assert.equal(badTwo.body.error, "too_many_login_attempts");
+    assert.equal(badTwo.response.headers.get("retry-after"), "60");
+
+    const correctWhileLocked = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.5" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    assert.equal(correctWhileLocked.response.status, 429);
+
+    const correctDifferentIp = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.6" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    assert.equal(correctDifferentIp.response.status, 200);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("successful login clears previous failed attempts before threshold", async () => {
+  const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());
+  const bff = await startBff({
+    authOnly: true,
+    sub2apiAdminEmail: "",
+    sub2apiAdminPassword: "",
+    loginMaxFailures: 2,
+    loginWindowSeconds: 60,
+    loginLockSeconds: 60,
+  }, mock.baseUrl);
+
+  try {
+    const bad = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.9" },
+      body: JSON.stringify({ password: "wrong" }),
+    });
+    assert.equal(bad.response.status, 401);
+
+    const good = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.9" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    assert.equal(good.response.status, 200);
+
+    const badAgain = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.9" },
+      body: JSON.stringify({ password: "wrong-again" }),
+    });
+    assert.equal(badAgain.response.status, 401);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("state-changing auth/config/proxy requests reject cross-origin callers", async () => {
+  let upstreamCalls = 0;
+  const mock = await startMockSub2Api((_req, res) => {
+    upstreamCalls += 1;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  const bff = await startBff({ sub2apiAdminBearerToken: "static-admin-token", sub2apiAdminPassword: "" }, mock.baseUrl);
+
+  try {
+    const crossOriginLogin = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    assert.equal(crossOriginLogin.response.status, 403);
+
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const crossOriginConfig = await fetchJson(`${bff.baseUrl}/token-manager-auth/config`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: "https://evil.example" },
+      body: JSON.stringify({ priority: 9 }),
+    });
+    assert.equal(crossOriginConfig.response.status, 403);
+
+    const crossOriginProxy = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts/batch`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json", "Sec-Fetch-Site": "cross-site" },
+      body: JSON.stringify({ accounts: [] }),
+    });
+    assert.equal(crossOriginProxy.response.status, 403);
+    assert.equal(upstreamCalls, 0);
   } finally {
     await bff.close();
     await mock.close();
@@ -220,7 +426,7 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
 
     const unauthenticatedPage = await fetchText(`${bff.baseUrl}/token-manager/`);
     assert.equal(unauthenticatedPage.response.status, 401);
-    assert.match(unauthenticatedPage.body, /TokenManager 访问密码/);
+    assert.match(unauthenticatedPage.body, /<h1>TokenManager<\/h1>/);
     assert.match(unauthenticatedPage.body, /\/token-manager\/auth\/login/);
 
     const unauthenticatedIcon = await fetchText(`${bff.baseUrl}/token-manager/favicon.svg`);
@@ -240,8 +446,13 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
       headers: { Cookie: cookie },
     });
     assert.equal(app.response.status, 200);
+    assert.doesNotMatch(app.response.headers.get("content-security-policy") || "", /unsafe-inline/);
+    assert.match(app.response.headers.get("content-security-policy") || "", /script-src 'self'(?:;|$)/);
+    assert.doesNotMatch(app.body, /style="/);
     assert.match(app.body, /id="save-sub2api-config"/);
-    assert.match(app.body, /src="\.\/app\.js\?v=20260606-upsert-privacy"/);
+    assert.match(app.body, /id="logout-button"/);
+    assert.match(app.body, /href="\.\/styles\.css\?v=20260607-account-inactive-status"/);
+    assert.match(app.body, /src="\.\/app\.js\?v=20260607-account-inactive-status"/);
 
     const appScript = await fetchText(`${bff.baseUrl}/token-manager/app.js`, {
       headers: { Cookie: cookie },
@@ -269,6 +480,14 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
     });
     assert.equal(proxied.response.status, 200);
     assert.equal(upstreamRequests.some((url) => url === "/api/v1/admin/accounts?page=1"), true);
+
+    const schedulable = await fetchJson(`${bff.baseUrl}/token-manager/api/admin/accounts/7/schedulable`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ schedulable: true }),
+    });
+    assert.equal(schedulable.response.status, 200);
+    assert.equal(upstreamRequests.some((url) => url === "/api/v1/admin/accounts/7/schedulable"), true);
   } finally {
     await bff.close();
     await mock.close();
@@ -335,6 +554,20 @@ test("login sets an HttpOnly cookie without returning any bearer token", async (
     assert.match(setCookie, /HttpOnly/);
     assert.match(setCookie, /Secure/);
     assert.match(setCookie, /SameSite=Lax/);
+
+    const cookie = setCookie.split(";")[0];
+    const logout = await fetchJson(`${bff.baseUrl}/token-manager-auth/logout`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+    assert.equal(logout.response.status, 200);
+    assert.equal(logout.body.authenticated, false);
+    assert.match(logout.response.headers.get("set-cookie") || "", /Max-Age=0/);
+
+    const afterLogout = await fetchJson(`${bff.baseUrl}/token-manager-auth/config`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(afterLogout.response.status, 401);
   } finally {
     await bff.close();
     await mock.close();
@@ -459,8 +692,20 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
       id: "42",
       name: "Saved Account",
       email: "saved@example.com",
-      expires_at: "",
+      platform: "",
+      type: "",
+      plan_type: "",
       status: "active",
+      privacy_mode: "",
+      groups: "",
+      proxy: "",
+      concurrency: "",
+      priority: "",
+      rate_multiplier: "",
+      expires_at: "",
+      created_at: "",
+      updated_at: "",
+      last_used_at: "",
     }]);
     assert.equal(saved.body.server_account_total, 1);
     assert.doesNotMatch(JSON.stringify(saved.body), /must-not-be-persisted/);
@@ -491,8 +736,20 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
       id: "42",
       name: "Saved Account",
       email: "saved@example.com",
-      expires_at: "",
+      platform: "",
+      type: "",
+      plan_type: "",
       status: "active",
+      privacy_mode: "",
+      groups: "",
+      proxy: "",
+      concurrency: "",
+      priority: "",
+      rate_multiplier: "",
+      expires_at: "",
+      created_at: "",
+      updated_at: "",
+      last_used_at: "",
     }]);
     assert.equal(persisted.serverAccountTotal, 1);
     assert.doesNotMatch(JSON.stringify(persisted), /must-not-be-persisted/);
@@ -646,6 +903,76 @@ test("authenticated proxy injects sub2api bearer server-side only", async () => 
       upstreamRequests.some((item) => item.url === "/api/v1/admin/accounts?page=1" && item.authorization === "Bearer admin-access-token"),
       true,
     );
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("account list proxy strips credential secrets before returning data to browser", async () => {
+  const mock = await startMockSub2Api(async (req, res) => {
+    if (req.url === "/api/v1/admin/accounts?page=1") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        data: {
+          items: [{
+            id: 1,
+            name: "Account",
+            credentials: {
+              email: "safe@example.com",
+              plan_type: "plus",
+              access_token: "must-not-reach-browser",
+              refreshToken: "must-not-reach-browser",
+              id_token: "must-not-reach-browser",
+              apiKey: "must-not-reach-browser",
+            },
+            tokens: {
+              sessionToken: "must-not-reach-browser",
+              account_id: "acct-safe",
+            },
+            credentials_status: {
+              has_access_token: true,
+              has_refresh_token: true,
+              has_api_key: true,
+            },
+            extra: {
+              openai_apikey_responses_websockets_v2_enabled: true,
+            },
+          }],
+        },
+      }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  const bff = await startBff({ sub2apiAdminBearerToken: "static-admin-token", sub2apiAdminPassword: "" }, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    const proxied = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts?page=1`, {
+      headers: { Cookie: cookie },
+    });
+    const account = proxied.body.data.items[0];
+    const text = JSON.stringify(proxied.body);
+
+    assert.equal(proxied.response.status, 200);
+    assert.equal(account.credentials.email, "safe@example.com");
+    assert.equal(account.credentials.plan_type, "plus");
+    assert.equal(account.tokens.account_id, "acct-safe");
+    assert.equal(account.credentials_status.has_access_token, true);
+    assert.equal(account.credentials_status.has_api_key, true);
+    assert.equal(account.extra.openai_apikey_responses_websockets_v2_enabled, true);
+    assert.doesNotMatch(text, /must-not-reach-browser/);
+    assert.equal(account.credentials.access_token, undefined);
+    assert.equal(account.credentials.refreshToken, undefined);
+    assert.equal(account.credentials.id_token, undefined);
+    assert.equal(account.credentials.apiKey, undefined);
+    assert.equal(account.tokens.sessionToken, undefined);
   } finally {
     await bff.close();
     await mock.close();

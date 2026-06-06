@@ -511,23 +511,37 @@ function testSub2apiImportToolsOnlyVisibleForSub2apiFormat() {
   const sub2apiButton = formatButtons.find((button) => button.dataset.format === "sub2api");
 
   assert.equal(elements.get("#sub2api-tools").hidden, false);
+  assert.equal(elements.get("#output-import-actions").hidden, false);
   assert.equal(elements.get("#import-sub2api").hidden, false);
+  assert.equal(elements.get("#import-sub2api").disabled, true);
 
   dispatch(cpaButton, "click");
   assert.equal(elements.get("#sub2api-tools").hidden, true);
+  assert.equal(elements.get("#output-import-actions").hidden, true);
   assert.equal(elements.get("#import-sub2api").hidden, true);
   assert.equal(elements.get("#import-sub2api").disabled, true);
 
   dispatch(sub2apiButton, "click");
   assert.equal(elements.get("#sub2api-tools").hidden, false);
+  assert.equal(elements.get("#output-import-actions").hidden, false);
   assert.equal(elements.get("#import-sub2api").hidden, false);
+  assert.equal(elements.get("#import-sub2api").disabled, true);
+
+  elements.get("#session-input").value = JSON.stringify({
+    user: { email: "mark@example.com" },
+    accessToken: "access-token",
+  });
+  dispatch(elements.get("#session-input"), "input");
+  assert.equal(elements.get("#output-import-actions").hidden, false);
+  assert.equal(elements.get("#import-sub2api").hidden, false);
+  assert.equal(elements.get("#import-sub2api").disabled, false);
 }
 
 async function testServerDefaultSub2apiUrlHydratesInput() {
   const { elements } = loadPageScript({
     window: {
       location: {
-        origin: "https://api.wenlab.link",
+        origin: "https://sub2api.example.test",
         protocol: "https:",
         search: "",
       },
@@ -603,6 +617,57 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
   assert.equal(elements.get("#sub2api-set-privacy").checked, true);
 }
 
+async function testLogoutButtonPostsLogoutAndRedirects() {
+  const capturedRequests = [];
+  let redirectedTo = "";
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://sub2api.example.test",
+        protocol: "https:",
+        search: "",
+        replace(value) {
+          redirectedTo = value;
+        },
+      },
+    },
+    fetch: async (url, options = {}) => {
+      capturedRequests.push({ url: String(url), options });
+      if (url === "/token-manager/auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sub2api_proxy_enabled: true,
+            sub2api_default_origin: "https://sub2api.example.test",
+            sub2api_import_path: "/api/v1/admin/accounts/data",
+          }),
+        };
+      }
+      if (url === "/token-manager/auth/logout") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ authenticated: false }),
+        };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+
+  await flushAsync();
+
+  assert.equal(elements.get("#logout-button").hidden, false);
+  dispatch(elements.get("#logout-button"), "click");
+  await flushAsync();
+
+  const logout = capturedRequests.find((request) => request.url === "/token-manager/auth/logout");
+  assert.ok(logout, "logout button should call the logout endpoint");
+  assert.equal(logout.options.method, "POST");
+  assert.equal(logout.options.credentials, "same-origin");
+  assert.equal(redirectedTo, "/token-manager/");
+}
+
 function testCustomGroupPickerSelectsVisibleGroupsAndClears() {
   const { elements } = loadPageScript();
   const groups = elements.get("#sub2api-groups");
@@ -649,7 +714,7 @@ async function testLegacyNamedBindingsHydrateCheckedItems() {
   const { elements } = loadPageScript({
     window: {
       location: {
-        origin: "https://api.wenlab.link",
+        origin: "https://sub2api.example.test",
         protocol: "https:",
         search: "",
       },
@@ -809,7 +874,7 @@ async function testServerProxyModeImportsWithoutBrowserBearer() {
   const { elements } = loadPageScript({
     window: {
       location: {
-        origin: "https://api.wenlab.link",
+        origin: "https://sub2api.example.test",
         protocol: "https:",
         search: "",
       },
@@ -821,7 +886,7 @@ async function testServerProxyModeImportsWithoutBrowserBearer() {
           status: 200,
           json: async () => ({
             sub2api_proxy_enabled: true,
-            sub2api_default_origin: "https://api.wenlab.link",
+            sub2api_default_origin: "https://sub2api.example.test",
             sub2api_import_path: "/api/v1/admin/accounts/data",
           }),
         };
@@ -871,7 +936,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   const { elements } = loadPageScript({
     window: {
       location: {
-        origin: "https://api.wenlab.link",
+        origin: "https://sub2api.example.test",
         protocol: "https:",
         search: "",
       },
@@ -907,7 +972,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
           status: 200,
           json: async () => ({
             sub2api_proxy_enabled: true,
-            sub2api_default_origin: "https://api.wenlab.link",
+            sub2api_default_origin: "https://sub2api.example.test",
             sub2api_import_path: "/api/v1/admin/accounts/data",
           }),
         };
@@ -1275,10 +1340,31 @@ async function testRefreshServerAccountsFetchesPersistedAccounts() {
             items: [{
               id: 7,
               name: "Saved Account",
+              platform: "openai",
+              type: "oauth",
               credentials: {
                 email: "saved@example.com",
-                expires_at: "2026-08-06T14:29:36.155Z",
+                plan_type: "plus",
               },
+              extra: {
+                privacy_mode: "enabled",
+                openai_passthrough: true,
+              },
+              account_groups: [
+                { group_id: 11, group: { id: 11, name: "日卡" } },
+                { group_id: 13, group: { id: 13, name: "周卡" } },
+              ],
+              group_ids: [11, 13],
+              proxy_id: 3,
+              proxy: { id: 3, name: "Proxy JP" },
+              concurrency: 4,
+              current_concurrency: 1,
+              priority: 2,
+              rate_multiplier: 1.5,
+              expires_at: 1781580950,
+              created_at: "2026-06-06T00:00:00.000Z",
+              updated_at: "2026-08-01T00:00:00.000Z",
+              last_used_at: 0,
               status: "active",
             }],
             total: 1,
@@ -1300,15 +1386,328 @@ async function testRefreshServerAccountsFetchesPersistedAccounts() {
   );
   assert.equal(capturedRequests[0].options.headers.Authorization, "Bearer test-token");
   assert.match(elements.get("#server-account-body").innerHTML, /saved@example\.com/);
+  assert.match(elements.get("#server-account-body").innerHTML, /openai/);
+  assert.match(elements.get("#server-account-body").innerHTML, /oauth/);
+  assert.match(elements.get("#server-account-body").innerHTML, /PLUS/);
+  assert.match(elements.get("#server-account-body").innerHTML, /plan-plus/);
+  assert.match(elements.get("#server-account-body").innerHTML, /日卡、周卡/);
+  assert.match(elements.get("#server-account-body").innerHTML, /Proxy JP/);
+  assert.match(elements.get("#server-account-body").innerHTML, /1 \/ 4/);
+  assert.doesNotMatch(elements.get("#server-account-body").innerHTML, /1970/);
   assert.match(elements.get("#server-account-status").textContent, /列表已缓存/);
   assert.deepEqual(capturedConfigPosts[0].server_account_cache, [{
     id: "7",
     name: "Saved Account",
     email: "saved@example.com",
-    expires_at: "2026-08-06T14:29:36.155Z",
+    platform: "openai",
+    type: "oauth",
+    plan_type: "plus",
     status: "active",
+    privacy_mode: "enabled",
+    groups: "日卡、周卡",
+    proxy: "Proxy JP (#3)",
+    concurrency: "1 / 4",
+    priority: "2",
+    rate_multiplier: "1.5",
+    expires_at: "2026-06-16T03:35:50.000Z",
+    created_at: "2026-06-06T00:00:00.000Z",
+    updated_at: "2026-08-01T00:00:00.000Z",
+    last_used_at: "",
   }]);
   assert.equal(capturedConfigPosts[0].server_account_total, 1);
+}
+
+async function testServerAccountRenderingEscapesUntrustedFields() {
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://tokenmanager.example.com",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url, options) => {
+      if (url === "/token-manager/auth/config" && options?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ ok: true }),
+        };
+      }
+      if (url === "/token-manager/auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sub2api_api_base_path: "/api/v1" }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          data: {
+            items: [{
+              id: 9,
+              name: "\"><script>window.__xss=1</script>",
+              platform: "openai",
+              type: "oauth",
+              credentials: {
+                email: "evil@example.com\"><img src=x onerror=alert(1)>",
+                plan_type: "plus\"><svg onload=alert(2)>",
+              },
+              extra: {
+                privacy_mode: "enabled\"><script>alert(3)</script>",
+              },
+              account_groups: [
+                { group_id: 11, group: { id: 11, name: "日卡\"><img src=x onerror=alert(4)>" } },
+              ],
+              proxy: { id: 3, name: "Proxy JP\"><script>alert(5)</script>" },
+              status: "active\"><script>alert(6)</script>",
+            }],
+            total: 1,
+          },
+        }),
+      };
+    },
+  });
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+  dispatch(elements.get("#refresh-server-accounts"), "click");
+  await flushAsync();
+
+  const html = elements.get("#server-account-body").innerHTML;
+  assert.match(html, /&lt;script&gt;window\.__xss=1&lt;\/script&gt;/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(html, /<script/i);
+  assert.doesNotMatch(html, /<img/i);
+  assert.doesNotMatch(html, /<svg/i);
+}
+
+async function testServerAccountSearchSelectionAndBatchActions() {
+  const capturedRequests = [];
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://tokenmanager.example.com",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url, options = {}) => {
+      if (url === "/token-manager/auth/config" && options?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ ok: true }),
+        };
+      }
+      if (url === "/token-manager/auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sub2api_api_base_path: "/api/v1" }),
+        };
+      }
+
+      capturedRequests.push({ url: String(url), options });
+      if (String(url).includes("/admin/accounts?")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            data: {
+              items: [
+                {
+                  id: 7,
+                  name: "Daily Card",
+                  platform: "openai",
+                  type: "oauth",
+                  credentials: { email: "daily@example.com", plan_type: "team" },
+                  extra: { privacy_mode: "unknown" },
+                  groups: [{ id: 11, name: "日卡" }],
+                  proxy: { id: 3, name: "Proxy JP" },
+                  concurrency: 2,
+                  priority: 9,
+                  status: "active",
+                  schedulable: true,
+                },
+                {
+	                  id: 8,
+	                  name: "Weekly Card",
+	                  platform: "openai",
+	                  type: "oauth",
+	                  credentials: { email: "weekly@example.com", plan_type: "pro_lite" },
+	                  groups: [{ id: 12, name: "周卡" }],
+	                  status: "inactive",
+	                },
+	                {
+	                  id: 11,
+	                  name: "Entitlement Pro",
+	                  platform: "openai",
+	                  type: "oauth",
+	                  credentials: { email: "pro@example.com" },
+	                  entitlement: { subscription_plan: "chatgptpro" },
+	                  groups: [{ id: 99, name: "其他" }],
+	                  status: "active",
+	                  schedulable: true,
+	                },
+	                {
+	                  id: 10,
+	                  name: "Abnormal OAuth",
+	                  platform: "openai",
+	                  type: "oauth",
+	                  credentials: { email: "abnormal@example.com", plan_type: "abnormal" },
+	                  groups: [{ id: 99, name: "其他" }],
+	                  status: "active",
+	                  schedulable: false,
+	                },
+	                {
+	                  id: 9,
+                  name: "API Key Card",
+                  platform: "openai",
+                  type: "apikey",
+                  groups: [{ id: 99, name: "其他" }],
+                  status: "active",
+                  schedulable: true,
+	                },
+	              ],
+	              total: 5,
+            },
+          }),
+        };
+      }
+      if (String(url).endsWith("/admin/accounts/7") && options.method === "PUT") {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 7 } }) };
+      }
+      if (String(url).endsWith("/admin/accounts/7/set-privacy") && options.method === "POST") {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 7 } }) };
+      }
+      if (String(url).endsWith("/admin/accounts/7/schedulable") && options.method === "POST") {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 7 } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+  });
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+  dispatch(elements.get("#refresh-server-accounts"), "click");
+  await flushAsync();
+
+  assert.match(elements.get("#server-account-body").innerHTML, /Daily Card/);
+  assert.match(elements.get("#server-account-body").innerHTML, /Proxy JP/);
+  assert.match(elements.get("#server-account-body").innerHTML, /privacy: unknown/);
+  assert.match(elements.get("#server-account-body").innerHTML, /Weekly Card/);
+  assert.match(elements.get("#server-account-body").innerHTML, /账号已禁用/);
+	  assert.match(elements.get("#server-account-body").innerHTML, /server-switch-label">启用/);
+	  assert.match(elements.get("#server-account-body").innerHTML, /TEAM/);
+	  assert.match(elements.get("#server-account-body").innerHTML, /PRO LITE/);
+	  assert.match(elements.get("#server-account-body").innerHTML, /PRO/);
+	  assert.match(elements.get("#server-account-body").innerHTML, /plan-pro/);
+	  assert.match(elements.get("#server-account-body").innerHTML, /异常/);
+	  assert.match(elements.get("#server-account-body").innerHTML, /plan-abnormal/);
+	  assert.doesNotMatch(elements.get("#server-account-body").innerHTML, /API Key Card[\\s\\S]*plan-/);
+  assert.match(elements.get("#server-account-body").innerHTML, /Privacy 不适用/);
+
+  elements.get("#server-account-search").value = "日卡";
+  dispatch(elements.get("#server-account-search"), "input");
+  assert.match(elements.get("#server-account-body").innerHTML, /Daily Card/);
+  assert.doesNotMatch(elements.get("#server-account-body").innerHTML, /Weekly Card/);
+  assert.match(elements.get("#server-account-body").innerHTML, /关闭 Privacy/);
+  assert.match(elements.get("#server-account-body").innerHTML, /server-switch-label">启用/);
+  assert.match(elements.get("#server-account-body").innerHTML, /server-switch-label">调度/);
+  assert.doesNotMatch(elements.get("#server-account-body").innerHTML, /server-switch-state/);
+
+  dispatch(elements.get("#toggle-visible-server-account-selection"), "click");
+  assert.match(elements.get("#server-account-selection-summary").textContent, /已选择 1 个账号/);
+  assert.equal(elements.get("#toggle-visible-server-account-selection").textContent, "清空选择");
+
+  elements.get("#sub2api-groups").selectedOptions = [{ value: "11" }, { value: "13" }];
+  dispatch(elements.get("#sub2api-groups"), "change");
+  elements.get("#sub2api-proxy").selectedOptions = [{ value: "3" }];
+  dispatch(elements.get("#sub2api-proxy"), "change");
+  elements.get("#sub2api-concurrency").value = "6";
+  dispatch(elements.get("#sub2api-concurrency"), "input");
+
+  dispatch(elements.get("#apply-selected-server-account-settings"), "click");
+  await flushAsync();
+
+  const updateRequest = capturedRequests.find((request) => request.url.endsWith("/admin/accounts/7") && request.options.method === "PUT");
+  assert.ok(updateRequest, "batch apply should PUT selected account settings");
+  const updateBody = JSON.parse(updateRequest.options.body);
+  assert.deepEqual(updateBody.group_ids, [11, 13]);
+  assert.equal(updateBody.proxy_id, 3);
+  assert.equal(updateBody.concurrency, 6);
+  assert.equal(updateBody.confirm_mixed_channel_risk, true);
+
+  dispatch(elements.get("#privacy-selected-server-accounts"), "click");
+  await flushAsync();
+
+  assert.ok(
+    capturedRequests.some((request) => request.url.endsWith("/admin/accounts/7/set-privacy") && request.options.method === "POST"),
+    "batch privacy should call set-privacy for selected account",
+  );
+
+  dispatchWithTarget(elements.get("#server-account-body"), "click", {
+    dataset: { serverAction: "stop-schedule", serverAccountId: "7" },
+  });
+  await flushAsync();
+
+  assert.ok(
+    capturedRequests.some((request) =>
+      request.url.endsWith("/admin/accounts/7/schedulable")
+      && request.options.method === "POST"
+      && JSON.parse(request.options.body).schedulable === false
+    ),
+    "stop scheduling should call sub2api schedulable endpoint",
+  );
+
+  dispatchWithTarget(elements.get("#server-account-body"), "click", {
+    dataset: { serverAction: "start-schedule", serverAccountId: "7" },
+  });
+  await flushAsync();
+
+  assert.ok(
+    capturedRequests.some((request) =>
+      request.url.endsWith("/admin/accounts/7/schedulable")
+      && request.options.method === "POST"
+      && JSON.parse(request.options.body).schedulable === true
+    ),
+    "start scheduling should call sub2api schedulable endpoint",
+  );
+
+  dispatchWithTarget(elements.get("#server-account-body"), "click", {
+    dataset: {},
+    closest(selector) {
+      assert.equal(selector, "[data-server-action][data-server-account-id]");
+      return { dataset: { serverAction: "disable-account", serverAccountId: "7" }, disabled: false };
+    },
+  });
+  await flushAsync();
+
+  assert.ok(
+    capturedRequests.some((request) =>
+      request.url.endsWith("/admin/accounts/7")
+      && request.options.method === "PUT"
+      && JSON.parse(request.options.body).status === "inactive"
+    ),
+    "disable account should set sub2api account status to inactive",
+  );
+
+  dispatchWithTarget(elements.get("#server-account-body"), "click", {
+    dataset: { serverAction: "enable-account", serverAccountId: "7" },
+  });
+  await flushAsync();
+
+  assert.ok(
+    capturedRequests.some((request) =>
+      request.url.endsWith("/admin/accounts/7")
+      && request.options.method === "PUT"
+      && JSON.parse(request.options.body).status === "active"
+    ),
+    "enable account should update sub2api account status",
+  );
 }
 
 async function testUrlTokenDoesNotHydrateBearerOrFetchAccounts() {
@@ -1420,6 +1819,7 @@ async function main() {
   testMultilineJsonDocumentsConvertMultipleAccounts();
   testFormatInputToggleAddsLineBreaks();
   await testServerDefaultSub2apiUrlHydratesInput();
+  await testLogoutButtonPostsLogoutAndRedirects();
   await testSub2apiUrlShorthandNormalizesToApiEndpoints();
   await testServerProxyModeImportsWithoutBrowserBearer();
   await testSaveSub2apiConfigPostsServerSettings();
@@ -1427,6 +1827,8 @@ async function main() {
   await testImportToSub2ApiRandomlyAssignsSelectedProxies();
   await testImportToSub2ApiUpdatesDuplicateAndSetsPrivacy();
   await testRefreshServerAccountsFetchesPersistedAccounts();
+  await testServerAccountRenderingEscapesUntrustedFields();
+  await testServerAccountSearchSelectionAndBatchActions();
   await testUrlTokenDoesNotHydrateBearerOrFetchAccounts();
   await testFetchSub2ApiMetaUsesSub2apiAllEndpoints();
   console.log("convert-session tests passed");

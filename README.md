@@ -1,6 +1,12 @@
 # ChatGPT Session to CPA / sub2api / Cockpit / 9router / Codex / AxonHub / Codex-Manager
 
-纯前端单页面工具，用来把 ChatGPT Web 登录 session JSON 转换成 CPA、sub2api、Cockpit Tools、9router、Codex auth.json、AxonHub 或 Codex-Manager 可导入 JSON。
+私有网页端工具，用来把 ChatGPT Web 登录 session JSON 转换成 CPA、sub2api、Cockpit Tools、9router、Codex auth.json、AxonHub 或 Codex-Manager 可导入 JSON；也可对接私有 sub2api 后端，将账号信息持久化保存在服务器数据库中。
+
+## 私有部署使用
+
+代码仓库：<https://github.com/jiwen77/TokenManager>
+
+建议部署在受保护的私有路径下，例如 `/token-manager/`，并让页面通过同源 `/api/v1/admin/...` 访问 sub2api。
 
 ## 使用提示
 
@@ -52,4 +58,4 @@ ChatGPT Web session 通常不包含 OAuth 文件里常见的 `refresh_token`，�
 docs/index.html
 ```
 
-所有解析和转换都在浏览器本地完成，不上传 token，不写入本地存储。
+默认转换预览在浏览器内完成，不写入本地存储。只有在填写私有 sub2api URL 和 Bearer Token 并点击导入/刷新时，页面才会向你的 sub2api 后端发送请求；导入后的账号数据由服务器端 sub2api/PostgreSQL 持久化保存。

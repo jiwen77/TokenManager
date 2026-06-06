@@ -11,6 +11,15 @@ tokens*.json
 auth*.json
 credentials*.json
 
+# Agent/runtime state and logs may contain local paths, diagnostics, or secrets
+.omx/
+.codex/
+*.log
+
+# Local research/scratch scripts used during one-off investigation
+fetch_*.py
+search_github.py
+
 # Dependency/build output if the project grows later
 node_modules/
 dist/

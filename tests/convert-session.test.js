@@ -16,6 +16,7 @@ function createFakeElement(selector, options = {}) {
     files: [],
     innerHTML: "",
     listeners: {},
+    selectedOptions: [],
     style: {},
     textContent: "",
     value: "",
@@ -41,6 +42,10 @@ function createFakeElement(selector, options = {}) {
     click() {
       this.listeners.click?.({ target: this });
     },
+    dispatchEvent(event) {
+      this.listeners[event.type]?.({ target: this });
+      return true;
+    },
     remove() {},
     select() {},
     setAttribute(name, value) {
@@ -49,7 +54,7 @@ function createFakeElement(selector, options = {}) {
   };
 }
 
-function loadPageScript() {
+function loadPageScript(overrides = {}) {
   const htmlPath = path.join(__dirname, "..", "docs", "index.html");
   const html = fs.readFileSync(htmlPath, "utf8");
   const match = html.match(/<script>\s*([\s\S]*?)\s*<\/script>\s*<\/body>/);
@@ -94,12 +99,28 @@ function loadPageScript() {
     clearTimeout,
     console,
     document,
+    Event: class Event {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    fetch: async () => {
+      throw new Error("fetch is not mocked")
+    },
+    localStorage: {
+      getItem() {
+        return null;
+      },
+      removeItem() {},
+      setItem() {},
+    },
     navigator: {
       clipboard: {
         async writeText() {},
       },
     },
     setTimeout,
+    ...overrides,
   };
 
   vm.runInNewContext(match[1], context, { filename: "docs/index.html" });
@@ -118,6 +139,20 @@ function jwtWithPayload(payload) {
     Buffer.from(JSON.stringify(payload)).toString("base64url"),
     "sig",
   ].join(".");
+}
+
+function testReferencedDomIdsExist() {
+  const htmlPath = path.join(__dirname, "..", "docs", "index.html");
+  const html = fs.readFileSync(htmlPath, "utf8");
+  const ids = new Set(Array.from(html.matchAll(/\bid=(["'])(.*?)\1/g), (match) => match[2]));
+  const referencedIds = new Set(
+    Array.from(html.matchAll(/document\.querySelector\(\s*(["'])#([^"']+)\1\s*\)/g), (match) => match[2])
+  );
+  const missing = Array.from(referencedIds)
+    .filter((id) => !ids.has(id))
+    .sort();
+
+  assert.deepEqual(missing, [], "script must not reference missing DOM ids");
 }
 
 function testSub2apiAccountUsesAccessTokenExpiry() {
@@ -409,13 +444,176 @@ function testCodexManagerAuthJsonPreservesRealRefreshAndMetadata() {
   assert.equal(authJson.meta.chatgpt_account_id, "chatgpt-account-1");
 }
 
-testSub2apiAccountUsesAccessTokenExpiry();
-testSub2apiAccountsUseTheirOwnAccessTokenExpiry();
-testSyntheticIdTokenHasCodexParseableJwtFormat();
-testAxonHubAuthJsonUsesPlaceholderRefreshTokenWhenMissing();
-testAxonHubAuthJsonPreservesRealRefreshToken();
-testCodexAuthJsonMatchesNativeShapeWhenMissingRefreshToken();
-testCodexAuthJsonPreservesRealRefreshTokenAndIdToken();
-testCodexManagerAuthJsonUsesEmptyRefreshTokenWhenMissing();
-testCodexManagerAuthJsonPreservesRealRefreshAndMetadata();
-console.log("convert-session tests passed");
+async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
+  const capturedRequests = [];
+  const { elements } = loadPageScript({
+    fetch: async (url, options) => {
+      capturedRequests.push({ url, options });
+      if (String(url).includes("/admin/accounts?")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            data: {
+              items: [],
+              total: 0,
+            },
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          data: {
+            account_created: 1,
+            account_failed: 0,
+            proxy_created: 0,
+            proxy_reused: 0,
+          },
+        }),
+      };
+    },
+  });
+
+  const input = elements.get("#session-input");
+  const output = elements.get("#output");
+  const outputStatus = elements.get("#output-status");
+  const importButton = elements.get("#import-sub2api");
+  const sub2apiUrl = elements.get("#sub2api-url");
+  const sub2apiToken = elements.get("#sub2api-token");
+  const accessToken = jwtWithPayload({
+    exp: 1780473960,
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "chatgpt-account-1",
+    },
+  });
+
+  sub2apiUrl.value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  sub2apiToken.value = "test-token";
+
+  input.value = JSON.stringify({
+    user: {
+      email: "mark@example.com",
+    },
+    accessToken,
+  });
+  dispatch(input, "input");
+  dispatch(importButton, "click");
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const capturedRequest = capturedRequests.find((request) => request.options?.method === "POST");
+  assert.ok(capturedRequest, "expected import fetch to be called");
+  assert.equal(capturedRequest.url, "https://sub2api.example.com/api/v1/admin/accounts/data");
+  assert.equal(capturedRequest.options.method, "POST");
+  assert.equal(capturedRequest.options.headers.Authorization, "Bearer test-token");
+
+  const body = JSON.parse(capturedRequest.options.body);
+  assert.equal(body.skip_default_group_bind, true);
+  assert.equal(body.data.proxies.length, 0);
+  assert.equal(body.data.accounts.length, 1);
+  assert.equal(body.data.accounts[0].platform, "openai");
+  assert.equal(body.data.accounts[0].type, "oauth");
+  assert.equal(body.data.accounts[0].credentials.access_token, accessToken);
+  assert.match(outputStatus.textContent, /已导入 sub2api/);
+  assert.ok(
+    capturedRequests.some((request) => String(request.url).startsWith("https://sub2api.example.com/api/v1/admin/accounts?")),
+    "successful import should refresh persisted server accounts"
+  );
+}
+
+async function testRefreshServerAccountsFetchesPersistedAccounts() {
+  const capturedRequests = [];
+  const { elements } = loadPageScript({
+    fetch: async (url, options) => {
+      capturedRequests.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          data: {
+            items: [{
+              id: 7,
+              name: "Saved Account",
+              credentials: {
+                email: "saved@example.com",
+                expires_at: "2026-08-06T14:29:36.155Z",
+              },
+              status: "active",
+            }],
+            total: 1,
+          },
+        }),
+      };
+    },
+  });
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+
+  dispatch(elements.get("#refresh-server-accounts"), "click");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    capturedRequests[0].url,
+    "https://sub2api.example.com/api/v1/admin/accounts?page=1&page_size=50&sort_by=created_at&sort_order=desc"
+  );
+  assert.equal(capturedRequests[0].options.headers.Authorization, "Bearer test-token");
+  assert.match(elements.get("#server-account-body").innerHTML, /saved@example\.com/);
+  assert.match(elements.get("#server-account-status").textContent, /服务器已保存 1 个账号/);
+}
+
+async function testFetchSub2ApiMetaUsesSub2apiAllEndpoints() {
+  const capturedUrls = [];
+  const { elements } = loadPageScript({
+    fetch: async (url) => {
+      capturedUrls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          data: String(url).includes("/admin/groups/all")
+            ? [{ id: 1, name: "Default Group" }]
+            : [{ id: 2, name: "Default Proxy" }],
+        }),
+      };
+    },
+  });
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+
+  dispatch(elements.get("#fetch-sub2api-meta"), "click");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(capturedUrls.sort(), [
+    "https://sub2api.example.com/api/v1/admin/groups/all",
+    "https://sub2api.example.com/api/v1/admin/proxies/all",
+  ]);
+  assert.match(elements.get("#sub2api-groups").innerHTML, /Default Group/);
+  assert.match(elements.get("#sub2api-proxy").innerHTML, /Default Proxy/);
+}
+
+async function main() {
+  testReferencedDomIdsExist();
+  testSub2apiAccountUsesAccessTokenExpiry();
+  testSub2apiAccountsUseTheirOwnAccessTokenExpiry();
+  testSyntheticIdTokenHasCodexParseableJwtFormat();
+  testAxonHubAuthJsonUsesPlaceholderRefreshTokenWhenMissing();
+  testAxonHubAuthJsonPreservesRealRefreshToken();
+  testCodexAuthJsonMatchesNativeShapeWhenMissingRefreshToken();
+  testCodexAuthJsonPreservesRealRefreshTokenAndIdToken();
+  testCodexManagerAuthJsonUsesEmptyRefreshTokenWhenMissing();
+  testCodexManagerAuthJsonPreservesRealRefreshAndMetadata();
+  await testImportToSub2ApiPostsCurrentSub2apiPayload();
+  await testRefreshServerAccountsFetchesPersistedAccounts();
+  await testFetchSub2ApiMetaUsesSub2apiAllEndpoints();
+  console.log("convert-session tests passed");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

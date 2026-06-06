@@ -119,13 +119,20 @@ TOKENMANAGER_DATABASE_FILE=/opt/tokenmanager/data/tokenmanager.sqlite
 TOKENMANAGER_ENCRYPTION_KEY=<至少32字节随机字符串>
 ```
 
-生成登录密码哈希（避免把明文密码写入 shell 历史）：
+修改 TokenManager 页面登录密码（自动生成哈希并写入 `.env`，避免手动复制）：
+
+```bash
+printf '%s' '你的新登录密码' | node server/tokenmanager-bff.js set-login-password --env /opt/tokenmanager/server/.env
+systemctl restart tokenmanager-bff
+```
+
+如只想打印哈希、不写文件，也可以使用：
 
 ```bash
 printf '%s' '你的登录密码' | node server/tokenmanager-bff.js hash-password
 ```
 
-生产环境建议由 systemd `EnvironmentFile=` 或仅服务器上的 `.env` 提供变量；不要提交 `.env`。TokenManager 登录密码只写入 `TOKENMANAGER_PASSWORD_HASH` 的哈希值，明文密码应放入密码管理器或 root-only 临时文件，不应放进 `.env`。
+生产环境建议由 systemd `EnvironmentFile=` 或仅服务器上的 `.env` 提供变量；不要提交 `.env`。TokenManager 登录密码只写入 `TOKENMANAGER_PASSWORD_HASH` 的哈希值，明文密码应放入密码管理器，不应放进 `.env`。
 
 ## 旧版 JSON 到 SQLite 迁移
 

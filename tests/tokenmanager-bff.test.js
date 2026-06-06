@@ -7,7 +7,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
-const { RuntimeConfigStore, createSub2ApiBrowserDefaults, createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, verifyPasswordHash } = require("../server/tokenmanager-bff");
+const { RuntimeConfigStore, createSub2ApiBrowserDefaults, createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, updateEnvFileText, verifyPasswordHash } = require("../server/tokenmanager-bff");
 
 function listen(server) {
   return new Promise((resolve) => {
@@ -89,6 +89,26 @@ test("hashPassword creates verifiable scrypt hashes", async () => {
   assert.match(encoded, /^scrypt:v1:/);
   assert.equal(await verifyPasswordHash("secret-password", encoded), true);
   assert.equal(await verifyPasswordHash("wrong-password", encoded), false);
+});
+
+test("updateEnvFileText replaces or appends login password hash", () => {
+  const updated = updateEnvFileText([
+    "# TOKENMANAGER_PASSWORD_HASH=commented",
+    "TOKENMANAGER_SESSION_SECRET=session-secret",
+    "export TOKENMANAGER_PASSWORD_HASH=old-hash",
+    "SUB2API_BASE_URL=http://127.0.0.1:8080/api/v1",
+    "",
+  ].join("\n"), "TOKENMANAGER_PASSWORD_HASH", "new-hash");
+
+  assert.match(updated, /^# TOKENMANAGER_PASSWORD_HASH=commented/m);
+  assert.match(updated, /^TOKENMANAGER_SESSION_SECRET=session-secret/m);
+  assert.match(updated, /^export TOKENMANAGER_PASSWORD_HASH=new-hash/m);
+  assert.doesNotMatch(updated, /old-hash/);
+  assert.match(updated, /^SUB2API_BASE_URL=http:\/\/127\.0\.0\.1:8080\/api\/v1/m);
+
+  const appended = updateEnvFileText("TOKENMANAGER_SESSION_SECRET=session-secret\n", "TOKENMANAGER_PASSWORD_HASH", "new-hash");
+  assert.match(appended, /^TOKENMANAGER_PASSWORD_HASH=new-hash/m);
+  assert.equal(appended.endsWith("\n"), true);
 });
 
 test("browser-facing sub2api defaults keep server origin separate from API paths", () => {

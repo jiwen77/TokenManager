@@ -1240,6 +1240,77 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function updateEnvFileText(text, key, value) {
+  const assignment = `${key}=${value}`;
+  const lines = String(text || "").split(/\r?\n/);
+  const matcher = new RegExp(`^(\\s*)(export\\s+)?${escapeRegExp(key)}\\s*=`);
+  let replaced = false;
+  const next = lines.map((line) => {
+    if (!replaced && !line.trimStart().startsWith("#") && matcher.test(line)) {
+      const [, indent = "", exportPrefix = ""] = line.match(matcher) || [];
+      replaced = true;
+      return `${indent}${exportPrefix || ""}${assignment}`;
+    }
+    return line;
+  });
+
+  while (next.length && next[next.length - 1] === "") {
+    next.pop();
+  }
+  if (!replaced) {
+    next.push(assignment);
+  }
+  return `${next.join("\n")}\n`;
+}
+
+function writeEnvFileValue(filePath, key, value) {
+  const resolved = path.resolve(filePath);
+  const current = fs.existsSync(resolved) ? fs.readFileSync(resolved, "utf8") : "";
+  const next = updateEnvFileText(current, key, value);
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  const tmp = `${resolved}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, next, { mode: 0o600 });
+  fs.renameSync(tmp, resolved);
+  try {
+    fs.chmodSync(resolved, 0o600);
+  } catch {
+    // Best effort on filesystems that do not support chmod.
+  }
+  return resolved;
+}
+
+async function setLoginPassword(argv = []) {
+  let envFile = process.env.TOKENMANAGER_ENV_FILE || path.join(process.cwd(), "server", ".env");
+  const passwordParts = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--env") {
+      index += 1;
+      envFile = argv[index] || envFile;
+    } else if (arg.startsWith("--env=")) {
+      envFile = arg.slice("--env=".length);
+    } else {
+      passwordParts.push(arg);
+    }
+  }
+
+  const password = passwordParts.length
+    ? passwordParts.join(" ")
+    : (await readStdin()).replace(/[\r\n]+$/, "");
+  if (!password) {
+    throw new Error("password is required on stdin or argv");
+  }
+
+  const encoded = await hashPassword(password);
+  const updatedFile = writeEnvFileValue(envFile, "TOKENMANAGER_PASSWORD_HASH", encoded);
+  process.stdout.write(`Updated TOKENMANAGER_PASSWORD_HASH in ${updatedFile}\n`);
+  process.stdout.write("Restart tokenmanager-bff for the new password to take effect.\n");
+}
+
 async function main(argv = process.argv.slice(2)) {
   if (argv[0] === "hash-password") {
     const password = argv[1] !== undefined ? argv.slice(1).join(" ") : (await readStdin()).replace(/[\r\n]+$/, "");
@@ -1247,6 +1318,10 @@ async function main(argv = process.argv.slice(2)) {
       throw new Error("password is required on stdin or argv");
     }
     process.stdout.write(`${await hashPassword(password)}\n`);
+    return;
+  }
+  if (argv[0] === "set-login-password" || argv[0] === "set-password") {
+    await setLoginPassword(argv.slice(1));
     return;
   }
 
@@ -1279,6 +1354,9 @@ module.exports = {
   hashPassword,
   hmac,
   loadEnvFile,
+  setLoginPassword,
+  updateEnvFileText,
   validateRuntimeConfig,
   verifyPasswordHash,
+  writeEnvFileValue,
 };

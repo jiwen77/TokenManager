@@ -4,7 +4,7 @@
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const { test } = require("node:test");
-const { createTokenManagerServer, hashPassword, verifyPasswordHash } = require("../server/tokenmanager-bff");
+const { createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, verifyPasswordHash } = require("../server/tokenmanager-bff");
 
 function listen(server) {
   return new Promise((resolve) => {
@@ -49,6 +49,7 @@ async function startBff(configOverrides = {}, sub2apiBaseUrl) {
     cookiePath: "/",
     maxBodyBytes: 1024 * 1024,
     upstreamTimeoutMs: 5000,
+    sub2apiBrowserDefaultUrl: "/api/v1",
     ...configOverrides,
   };
   const server = createTokenManagerServer({ config, logger: { info() {}, warn() {}, error() {} } });
@@ -79,6 +80,19 @@ test("hashPassword creates verifiable scrypt hashes", async () => {
   assert.equal(await verifyPasswordHash("secret-password", encoded), true);
   assert.equal(await verifyPasswordHash("wrong-password", encoded), false);
 });
+
+test("browser-facing sub2api default URL can be composed from env-style fields", () => {
+  assert.equal(createSub2ApiBrowserDefaultUrl({}), "/api/v1");
+  assert.equal(
+    createSub2ApiBrowserDefaultUrl({ TOKENMANAGER_SUB2API_DEFAULT_HOST: "api.example.com", TOKENMANAGER_SUB2API_DEFAULT_PATH: "custom/api" }),
+    "api.example.com/custom/api",
+  );
+  assert.equal(
+    createSub2ApiBrowserDefaultUrl({ TOKENMANAGER_SUB2API_DEFAULT_URL: "https://sub2api.example.com/api/v1" }),
+    "https://sub2api.example.com/api/v1",
+  );
+});
+
 
 test("unauthenticated proxy calls are rejected before sub2api is contacted", async () => {
   let upstreamCalls = 0;
@@ -131,6 +145,42 @@ test("page gate shows an in-page password form and needs no username", async () 
     await mock.close();
   }
 });
+
+test("authenticated config exposes only non-secret browser defaults", async () => {
+  const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());
+  const bff = await startBff({
+    authOnly: true,
+    sub2apiAdminEmail: "",
+    sub2apiAdminPassword: "",
+    sub2apiBrowserDefaultUrl: "api.example.com/custom-api",
+  }, mock.baseUrl);
+
+  try {
+    const unauthenticated = await fetchJson(`${bff.baseUrl}/token-manager-auth/config`);
+    assert.equal(unauthenticated.response.status, 401);
+    assert.equal(unauthenticated.body.error, "not_authenticated");
+
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const config = await fetchJson(`${bff.baseUrl}/token-manager-auth/config`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(config.response.status, 200);
+    assert.equal(config.body.sub2api_default_url, "api.example.com/custom-api");
+    assert.equal(config.body.bearer_token, undefined);
+    assert.equal(config.response.headers.get("cache-control"), "no-store");
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
 
 test("login sets an HttpOnly cookie without returning any bearer token", async () => {
   const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());

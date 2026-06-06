@@ -102,15 +102,14 @@ function loadPageScript(overrides = {}) {
     },
   };
 
+  const TestURL = URL;
+  TestURL.createObjectURL = () => "blob:test";
+  TestURL.revokeObjectURL = () => {};
+
   const context = {
     TextDecoder,
     TextEncoder,
-    URL: {
-      createObjectURL() {
-        return "blob:test";
-      },
-      revokeObjectURL() {},
-    },
+    URL: TestURL,
     atob,
     btoa,
     clearTimeout,
@@ -507,6 +506,85 @@ function testSub2apiImportToolsOnlyVisibleForSub2apiFormat() {
   assert.equal(elements.get("#import-sub2api").hidden, false);
 }
 
+async function testServerDefaultSub2apiUrlHydratesInput() {
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://api.wenlab.link",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url) => {
+      assert.equal(url, "/token-manager-auth/config");
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ sub2api_default_url: "api.example.com/custom-api" }),
+      };
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(elements.get("#sub2api-url").value, "api.example.com/custom-api");
+}
+
+async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
+  const capturedRequests = [];
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://tokenmanager.example.com",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url, options = {}) => {
+      if (url === "/token-manager-auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+        };
+      }
+
+      capturedRequests.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(String(url).includes("/admin/accounts?")
+          ? { data: { items: [], total: 0 } }
+          : { data: { account_created: 1, account_failed: 0, proxy_created: 0, proxy_reused: 0 } }),
+      };
+    },
+  });
+
+  const input = elements.get("#session-input");
+  const importButton = elements.get("#import-sub2api");
+  const accessToken = jwtWithPayload({
+    exp: 1780473960,
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "chatgpt-account-1",
+    },
+  });
+
+  elements.get("#sub2api-url").value = "sub2api.example.com:9443";
+  elements.get("#sub2api-token").value = "test-token";
+  input.value = JSON.stringify({ user: { email: "mark@example.com" }, accessToken });
+  dispatch(input, "input");
+  dispatch(importButton, "click");
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const post = capturedRequests.find((request) => request.options?.method === "POST");
+  assert.equal(post.url, "https://sub2api.example.com:9443/api/v1/admin/accounts/data");
+  assert.ok(
+    capturedRequests.some((request) => request.url.startsWith("https://sub2api.example.com:9443/api/v1/admin/accounts?")),
+    "shorthand host should also normalize server account refresh URL",
+  );
+}
+
 async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
   const capturedRequests = [];
   const { elements } = loadPageScript({
@@ -701,6 +779,8 @@ async function main() {
   testCodexManagerAuthJsonPreservesRealRefreshAndMetadata();
   testSub2apiTokenVisibilityToggle();
   testSub2apiImportToolsOnlyVisibleForSub2apiFormat();
+  await testServerDefaultSub2apiUrlHydratesInput();
+  await testSub2apiUrlShorthandNormalizesToApiEndpoints();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
   await testRefreshServerAccountsFetchesPersistedAccounts();
   await testUrlTokenDoesNotHydrateBearerOrFetchAccounts();

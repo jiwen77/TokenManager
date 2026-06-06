@@ -116,6 +116,35 @@ function normalizeBaseUrl(value) {
   return parsed.toString().replace(/\/+$/, "");
 }
 
+function joinUrlParts(base, suffix) {
+  const left = String(base || "").trim().replace(/\/+$/, "");
+  const right = String(suffix || "").trim().replace(/^\/+/, "");
+  if (!left) {
+    return right ? `/${right}` : "";
+  }
+  return right ? `${left}/${right}` : left;
+}
+
+function normalizePublicPath(value, fallback = "/api/v1") {
+  const raw = String(value || fallback).trim();
+  if (!raw) {
+    return fallback;
+  }
+  return raw.startsWith("/") ? raw : `/${raw}`;
+}
+
+function createSub2ApiBrowserDefaultUrl(env = process.env) {
+  const explicit = String(env.TOKENMANAGER_SUB2API_DEFAULT_URL || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const host = String(env.TOKENMANAGER_SUB2API_DEFAULT_HOST || env.TOKENMANAGER_SUB2API_DEFAULT_ORIGIN || "").trim();
+  const pathName = normalizePublicPath(env.TOKENMANAGER_SUB2API_DEFAULT_PATH, "/api/v1");
+  return host ? joinUrlParts(host, pathName) : pathName;
+}
+
+
 function createConfig(env = process.env) {
   const cookieSecure = parseBoolean(env.TOKENMANAGER_COOKIE_SECURE, env.NODE_ENV !== "development");
   const cookieName = env.TOKENMANAGER_COOKIE_NAME
@@ -126,6 +155,7 @@ function createConfig(env = process.env) {
     port: parsePositiveInteger(env.TOKENMANAGER_PORT || env.PORT, 8787),
     authOnly: parseBoolean(env.TOKENMANAGER_AUTH_ONLY, false),
     sub2apiBaseUrl: normalizeBaseUrl(env.SUB2API_BASE_URL),
+    sub2apiBrowserDefaultUrl: createSub2ApiBrowserDefaultUrl(env),
     sub2apiAdminApiKey: String(env.SUB2API_ADMIN_API_KEY || "").trim(),
     sub2apiAdminBearerToken: String(env.SUB2API_ADMIN_BEARER_TOKEN || env.SUB2API_BEARER_TOKEN || "").trim(),
     sub2apiJwtSecret: String(env.SUB2API_JWT_SECRET || ""),
@@ -793,6 +823,21 @@ async function handleAuth(req, res, parsedUrl, context) {
     return;
   }
 
+  if (pathname === "/token-manager-auth/config") {
+    if (req.method !== "GET") return methodNotAllowed(res);
+    const session = sessions.fromRequest(req);
+    if (!session) {
+      jsonResponse(res, 401, { error: "not_authenticated" });
+      return;
+    }
+    jsonResponse(res, 200, {
+      sub2api_default_url: config.sub2apiBrowserDefaultUrl || "/api/v1",
+    }, {
+      "Cache-Control": "no-store",
+    });
+    return;
+  }
+
   if (pathname === "/token-manager-auth/login") {
     if (req.method !== "POST") return methodNotAllowed(res);
     assertStateChangingRequestIsSameOrigin(req);
@@ -919,6 +964,7 @@ module.exports = {
   SessionManager,
   Sub2ApiTokenManager,
   createConfig,
+  createSub2ApiBrowserDefaultUrl,
   createTokenManagerServer,
   hashPassword,
   hmac,

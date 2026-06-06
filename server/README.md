@@ -14,15 +14,33 @@ TOKENMANAGER_SESSION_SECRET=<至少32字节随机字符串>
 TOKENMANAGER_PASSWORD_HASH=<node server/tokenmanager-bff.js hash-password 生成>
 TOKENMANAGER_HOST=127.0.0.1
 TOKENMANAGER_PORT=8787
+# 页面内 sub2api 地址输入框的默认值。当前同域反代推荐只填 /api/v1。
+TOKENMANAGER_SUB2API_DEFAULT_PATH=/api/v1
+# 如果 sub2api 是独立域名/端口，可改用下面二选一：
+# TOKENMANAGER_SUB2API_DEFAULT_HOST=https://api.example.com
+# TOKENMANAGER_SUB2API_DEFAULT_URL=https://api.example.com/api/v1
 ```
 
 Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-manager-auth/check }`。未登录时 BFF 会返回一个 HTML 密码表单；登录成功后写入 HttpOnly Cookie，再放行静态页面。
 
-登录信息建议这样保存：
+登录信息与页面默认值建议这样保存：
 
 - `.env`/systemd `EnvironmentFile` 保存 `TOKENMANAGER_PASSWORD_HASH` 和 `TOKENMANAGER_SESSION_SECRET`。
 - 不要把 TokenManager 明文登录密码写入 `.env`，更不要提交到 git；服务校验只需要哈希。
 - 如需临时留存明文密码用于找回，应放在服务器 root-only 文件或密码管理器中，权限建议 `600`；确认已记录后可以删除该明文文件。
+- `TOKENMANAGER_SUB2API_DEFAULT_*` 只控制网页里 sub2api 地址输入框的默认值，不包含 Bearer Token，也不会把任何 token 暴露给浏览器。
+- `SUB2API_BASE_URL` 是 BFF 服务端代理上游地址，给 Node 在服务器上访问用；网页输入框默认值请用 `TOKENMANAGER_SUB2API_DEFAULT_URL/HOST/PATH`，不要直接拿服务器内网 `127.0.0.1` 当浏览器默认地址。
+
+## 页面 sub2api 默认地址字段
+
+| 字段 | 作用 | 示例 |
+|---|---|---|
+| `TOKENMANAGER_SUB2API_DEFAULT_URL` | 直接指定页面输入框默认值，优先级最高 | `https://api.example.com/api/v1`、`/api/v1` |
+| `TOKENMANAGER_SUB2API_DEFAULT_HOST` | 指定默认域名/IP/端口，和 path 拼接 | `https://api.example.com`、`api.example.com:8443` |
+| `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` | `TOKENMANAGER_SUB2API_DEFAULT_HOST` 的别名 | `https://api.example.com` |
+| `TOKENMANAGER_SUB2API_DEFAULT_PATH` | 指定域名后的 API base path | `/api/v1` |
+
+页面会把这些默认值归一化：只填 `api.example.com` 会请求 `https://api.example.com/api/v1/admin/accounts/data`；只填 `/api/v1` 会请求当前同域的 `/api/v1/admin/accounts/data`。如果你的 sub2api 只有 HTTP，没有 HTTPS，建议通过 Caddy 同域反代后使用 `/api/v1`，避免浏览器 Mixed Content/CORS 问题。
 
 ## 可选：服务端代理 sub2api 管理接口
 

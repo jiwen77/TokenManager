@@ -937,8 +937,8 @@
             <div class="import-config" aria-label="sub2api 导入配置">
               <div class="import-config-grid">
                 <div class="config-field">
-                  <label for="sub2api-url">sub2api URL</label>
-                  <input id="sub2api-url" type="text" value="/api/v1/admin/accounts/data" spellcheck="false" />
+                  <label for="sub2api-url">sub2api 地址</label>
+                  <input id="sub2api-url" type="text" value="/api/v1" placeholder="/api/v1、api.example.com 或 https://api.example.com:8443" spellcheck="false" />
                 </div>
                 <div class="config-field">
                   <label for="sub2api-token">Bearer Token</label>
@@ -982,7 +982,7 @@
                 </div>
               </div>
 
-              <div class="config-hint" style="margin-top: 10px;">如果页面和 sub2api 在同一域名下，URL 保持默认即可；如果是不同端口或独立部署，就把这里改成完整接口地址。</div>
+              <div class="config-hint" style="margin-top: 10px;">可填同域路径（如 /api/v1）、域名、ip:端口、API base URL 或完整导入接口；未包含 /admin/accounts/data 时会自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。</div>
             </div>
             <section class="server-accounts-card" aria-labelledby="server-accounts-title">
               <div class="server-accounts-head">
@@ -1956,9 +1956,71 @@
           }
         }
 
-        function getSub2ApiEndpoint() {
-          const raw = String(elements.sub2apiUrl?.value || "").trim();
-          return raw || "/api/v1/admin/accounts/data";
+        const DEFAULT_SUB2API_API_BASE = "/api/v1";
+        const SUB2API_IMPORT_PATH = "/admin/accounts/data";
+
+        function getDefaultUrlProtocol() {
+          return window.location?.protocol === "http:" ? "http" : "https";
+        }
+
+        function looksLikeUrlHost(value) {
+          const head = String(value || "").split(/[/?#]/)[0];
+          return head === "localhost"
+            || head.includes(".")
+            || head.includes(":")
+            || /^\[[^\]]+\](?::\d+)?$/.test(head);
+        }
+
+        function normalizeUrlLikeInput(value) {
+          const raw = String(value || "").trim() || DEFAULT_SUB2API_API_BASE;
+          if (/^https?:\/\//i.test(raw)) {
+            return raw;
+          }
+          if (raw.startsWith("//")) {
+            return `${getDefaultUrlProtocol()}:${raw}`;
+          }
+          if (raw.startsWith("/")) {
+            return raw;
+          }
+          if (looksLikeUrlHost(raw)) {
+            return `${getDefaultUrlProtocol()}://${raw}`;
+          }
+          return `/${raw.replace(/^\/+/, "")}`;
+        }
+
+        function joinUrlPath(base, path) {
+          return `${String(base || "").replace(/\/+$/, "")}/${String(path || "").replace(/^\/+/, "")}`;
+        }
+
+        function getUrlPathname(value) {
+          try {
+            return new URL(value, window.location?.origin || "https://tokenmanager.local").pathname;
+          } catch {
+            return "";
+          }
+        }
+
+        function normalizeSub2ApiAdminBase(value) {
+          let base = normalizeUrlLikeInput(value)
+            .replace(/[?#].*$/, "")
+            .replace(/\/+$/, "");
+
+          for (const suffix of [SUB2API_IMPORT_PATH, "/admin/accounts"]) {
+            if (base.endsWith(suffix)) {
+              base = base.slice(0, -suffix.length).replace(/\/+$/, "");
+            }
+          }
+
+          if (!base) {
+            return DEFAULT_SUB2API_API_BASE;
+          }
+
+          const pathName = getUrlPathname(base);
+          if (!pathName || pathName === "/") {
+            return joinUrlPath(base, DEFAULT_SUB2API_API_BASE);
+          }
+
+          return base;
         }
 
         function getSub2ApiBearerToken() {
@@ -1966,20 +2028,43 @@
         }
 
         function getSub2ApiAdminBase() {
-          const endpoint = getSub2ApiEndpoint()
-            .replace(/[?#].*$/, "")
-            .replace(/\/+$/, "");
+          return normalizeSub2ApiAdminBase(elements.sub2apiUrl?.value);
+        }
 
-          if (endpoint.endsWith("/admin/accounts/data")) {
-            return endpoint.slice(0, -"/admin/accounts/data".length) || "/api/v1";
-          }
-
-          return endpoint || "/api/v1";
+        function getSub2ApiEndpoint() {
+          return joinUrlPath(getSub2ApiAdminBase(), SUB2API_IMPORT_PATH);
         }
 
         function getSub2ApiAdminUrl(path) {
-          const base = getSub2ApiAdminBase().replace(/\/+$/, "");
-          return `${base}${path}`;
+          return joinUrlPath(getSub2ApiAdminBase(), path);
+        }
+
+        function canLoadServerDefaults() {
+          const protocol = window.location?.protocol || "";
+          return protocol === "http:" || protocol === "https:";
+        }
+
+        async function hydrateSub2ApiDefaults() {
+          if (!canLoadServerDefaults()) {
+            return;
+          }
+
+          try {
+            const response = await fetch("/token-manager-auth/config", {
+              cache: "no-store",
+              headers: { Accept: "application/json" },
+            });
+            if (!response.ok) {
+              return;
+            }
+            const payload = await response.json();
+            const defaultUrl = firstNonEmpty(payload.sub2api_default_url, payload.sub2apiDefaultUrl);
+            if (defaultUrl && !elements.sub2apiUrl.dataset.userEdited) {
+              elements.sub2apiUrl.value = defaultUrl;
+            }
+          } catch {
+            // Static/local usage does not require the BFF config endpoint.
+          }
         }
 
         function buildUrlWithQuery(url, params) {
@@ -2335,6 +2420,10 @@
           scheduleConvert();
         });
 
+        elements.sub2apiUrl.addEventListener("input", () => {
+          elements.sub2apiUrl.dataset.userEdited = "true";
+        });
+
         elements.fetchSub2apiMeta.addEventListener("click", fetchSub2ApiMeta);
         elements.refreshServerAccounts.addEventListener("click", refreshServerAccounts);
         elements.sub2apiTokenToggle.addEventListener("click", () => {
@@ -2368,6 +2457,7 @@
 
         updateOutput();
         renderServerAccounts();
+        hydrateSub2ApiDefaults();
       })();
     </script>
   </body>

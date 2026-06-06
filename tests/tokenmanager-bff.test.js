@@ -1,0 +1,296 @@
+#!/usr/bin/env node
+"use strict";
+
+const assert = require("node:assert/strict");
+const http = require("node:http");
+const { test } = require("node:test");
+const { createTokenManagerServer, hashPassword, verifyPasswordHash } = require("../server/tokenmanager-bff");
+
+function listen(server) {
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
+}
+
+function close(server) {
+  return new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+}
+
+async function startMockSub2Api(handler) {
+  const server = http.createServer(handler);
+  const baseUrl = await listen(server);
+  return {
+    server,
+    baseUrl: `${baseUrl}/api/v1`,
+    close: () => close(server),
+  };
+}
+
+async function startBff(configOverrides = {}, sub2apiBaseUrl) {
+  const config = {
+    host: "127.0.0.1",
+    port: 0,
+    sub2apiBaseUrl,
+    sub2apiAdminEmail: "admin@example.com",
+    sub2apiAdminPassword: "sub2api-admin-password",
+    loginUsername: "",
+    loginPasswordHash: "",
+    loginPassword: "tokenmanager-password",
+    sessionSecret: "test-session-secret-that-is-long-enough-12345",
+    sessionTtlSeconds: 3600,
+    cookieName: "tokenmanager-session",
+    cookieSecure: true,
+    cookieSameSite: "Lax",
+    cookiePath: "/",
+    maxBodyBytes: 1024 * 1024,
+    upstreamTimeoutMs: 5000,
+    ...configOverrides,
+  };
+  const server = createTokenManagerServer({ config, logger: { info() {}, warn() {}, error() {} } });
+  const baseUrl = await listen(server);
+  return { server, baseUrl, close: () => close(server) };
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const text = await response.text();
+  return {
+    response,
+    body: text ? JSON.parse(text) : null,
+  };
+}
+
+test("hashPassword creates verifiable scrypt hashes", async () => {
+  const encoded = await hashPassword("secret-password", { salt: Buffer.from("1234567890123456"), N: 1024, r: 8, p: 1 });
+  assert.match(encoded, /^scrypt:v1:/);
+  assert.equal(await verifyPasswordHash("secret-password", encoded), true);
+  assert.equal(await verifyPasswordHash("wrong-password", encoded), false);
+});
+
+test("unauthenticated proxy calls are rejected before sub2api is contacted", async () => {
+  let upstreamCalls = 0;
+  const mock = await startMockSub2Api((_req, res) => {
+    upstreamCalls += 1;
+    res.writeHead(500).end();
+  });
+  const bff = await startBff({}, mock.baseUrl);
+
+  try {
+    const { response, body } = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts`);
+    assert.equal(response.status, 401);
+    assert.equal(body.error, "not_authenticated");
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("login sets an HttpOnly cookie without returning any bearer token", async () => {
+  const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());
+  const bff = await startBff({}, mock.baseUrl);
+
+  try {
+    const { response, body } = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const setCookie = response.headers.get("set-cookie") || "";
+
+    assert.equal(response.status, 200);
+    assert.equal(body.authenticated, true);
+    assert.equal(body.access_token, undefined);
+    assert.equal(body.refresh_token, undefined);
+    assert.match(setCookie, /HttpOnly/);
+    assert.match(setCookie, /Secure/);
+    assert.match(setCookie, /SameSite=Lax/);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("authenticated proxy injects sub2api bearer server-side only", async () => {
+  const upstreamRequests = [];
+  const mock = await startMockSub2Api(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = Buffer.concat(chunks).toString("utf8");
+    upstreamRequests.push({ method: req.method, url: req.url, authorization: req.headers.authorization, body });
+
+    if (req.url === "/api/v1/auth/login") {
+      assert.equal(req.method, "POST");
+      assert.ok(body.includes("admin@example.com"));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        code: 0,
+        message: "success",
+        data: {
+          access_token: "admin-access-token",
+          refresh_token: "admin-refresh-token",
+          expires_in: 3600,
+          token_type: "Bearer",
+        },
+      }));
+      return;
+    }
+
+    if (req.url === "/api/v1/admin/accounts?page=1") {
+      assert.equal(req.headers.authorization, "Bearer admin-access-token");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: { items: [], total: 0 } }));
+      return;
+    }
+
+    res.writeHead(404).end();
+  });
+  const bff = await startBff({}, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const proxied = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts?page=1`, {
+      headers: { Cookie: cookie },
+    });
+
+    assert.equal(proxied.response.status, 200);
+    assert.deepEqual(proxied.body.data, { items: [], total: 0 });
+    assert.equal(proxied.body.access_token, undefined);
+    assert.equal(upstreamRequests.some((item) => item.url === "/api/v1/auth/login"), true);
+    assert.equal(
+      upstreamRequests.some((item) => item.url === "/api/v1/admin/accounts?page=1" && item.authorization === "Bearer admin-access-token"),
+      true,
+    );
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+
+
+test("admin api key mode injects x-api-key instead of bearer", async () => {
+  const upstreamRequests = [];
+  const mock = await startMockSub2Api(async (req, res) => {
+    upstreamRequests.push({ url: req.url, authorization: req.headers.authorization, apiKey: req.headers["x-api-key"] });
+    if (req.url === "/api/v1/admin/proxies/all") {
+      assert.equal(req.headers["x-api-key"], "admin-test-key");
+      assert.equal(req.headers.authorization, undefined);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: [] }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  const bff = await startBff({
+    sub2apiAdminApiKey: "admin-test-key",
+    sub2apiAdminEmail: "",
+    sub2apiAdminPassword: "",
+  }, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    const proxied = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/proxies/all`, {
+      headers: { Cookie: cookie },
+    });
+
+    assert.equal(proxied.response.status, 200);
+    assert.equal(upstreamRequests.some((item) => item.url === "/api/v1/auth/login"), false);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("jwt-secret mode mints sub2api admin bearer without browser exposure", async () => {
+  const upstreamRequests = [];
+  const mock = await startMockSub2Api(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    upstreamRequests.push({ method: req.method, url: req.url, authorization: req.headers.authorization });
+
+    if (req.url === "/api/v1/admin/groups/all") {
+      assert.match(req.headers.authorization || "", /^Bearer /);
+      const token = req.headers.authorization.slice("Bearer ".length);
+      const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
+      assert.equal(payload.user_id, 42);
+      assert.equal(payload.email, "admin@example.com");
+      assert.equal(payload.role, "admin");
+      assert.equal(payload.token_version, 7);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: [] }));
+      return;
+    }
+
+    res.writeHead(404).end();
+  });
+  const bff = await startBff({
+    sub2apiAdminPassword: "",
+    sub2apiJwtSecret: "sub2api-jwt-secret",
+    sub2apiAdminUserId: "42",
+    sub2apiAdminTokenVersion: "7",
+    sub2apiSignedTokenTtlSeconds: 600,
+  }, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    const proxied = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/groups/all`, {
+      headers: { Cookie: cookie },
+    });
+
+    assert.equal(proxied.response.status, 200);
+    assert.equal(upstreamRequests.some((item) => item.url === "/api/v1/auth/login"), false);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("proxy whitelist blocks unrelated sub2api paths", async () => {
+  const mock = await startMockSub2Api((_req, res) => {
+    res.writeHead(200).end("should not be reached");
+  });
+  const bff = await startBff({}, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    const blocked = await fetchJson(`${bff.baseUrl}/token-manager-api/auth/login`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    assert.equal(blocked.response.status, 403);
+    assert.equal(blocked.body.error, "proxy_route_not_allowed");
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});

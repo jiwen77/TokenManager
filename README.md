@@ -1,14 +1,29 @@
 # ChatGPT Session to CPA / sub2api / Cockpit / 9router / Codex / AxonHub / Codex-Manager
 
-私有网页端工具，用来把 ChatGPT Web 登录 session JSON 转换成 CPA、sub2api、Cockpit Tools、9router、Codex auth.json、AxonHub 或 Codex-Manager 可导入 JSON；也可对接私有 sub2api 后端，将账号信息持久化保存在服务器数据库中。
+私有网页端工具，用来把 ChatGPT Web 登录 session JSON 转换成 CPA、sub2api、Cockpit Tools、9router、Codex auth.json、AxonHub 或 Codex-Manager 可导入 JSON；也可通过 TokenManager BFF 对接私有 sub2api 后端，将账号信息持久化保存在服务器数据库中。
 
-## 私有部署使用
+## 安全部署模式（推荐）
 
 代码仓库：<https://github.com/jiwen77/TokenManager>
 
-建议部署在受保护的私有路径下，例如 `/token-manager/`，并让页面通过同源 `/api/v1/admin/...` 访问 sub2api。
+推荐部署为：
 
-如果私有入口使用 `/token-manager/?token=...` 做访问校验，页面会自动把该 `token` 作为 sub2api Bearer Token 使用，并在打开时刷新服务器已保存账号列表；无需每次手动填写 Bearer Token。该 token 只保存在当前页面内存/输入框中，不写入浏览器本地存储。
+```text
+浏览器 /token-manager/ 静态页面
+  -> /token-manager-auth/*  同源登录/退出/me
+  -> /token-manager-api/*   同源 BFF 代理
+  -> sub2api /api/v1/admin/*（仅服务器内网访问）
+```
+
+安全边界：
+
+- 转换预览继续在浏览器本地完成，不写入 localStorage/sessionStorage。
+- 浏览器不再填写、不再保存、不再看到 sub2api Bearer/admin JWT。
+- TokenManager 登录后只持有 `HttpOnly; Secure; SameSite=Lax` 会话 Cookie。
+- sub2api 管理员邮箱、密码、Bearer/JWT 只保存在服务器环境变量和 BFF 内存中。
+- BFF 只白名单代理账号列表、账号导入、分组列表、代理列表四类 sub2api 管理接口。
+
+BFF 使用说明见 [`server/README.md`](server/README.md)。
 
 ## 使用提示
 
@@ -50,6 +65,7 @@ Plus 号可以用此方式导入中转站使用；Free 号的 access token 不�
 - `Codex`：生成原生 Codex `auth.json`，包含 `auth_mode: "chatgpt"`、`OPENAI_API_KEY: null`、`tokens.id_token/access_token/refresh_token/account_id` 和 `last_refresh`。缺少真实 `refresh_token` 时保留空字符串，access token 过期后不能自动刷新。
 - `AxonHub`：生成 AxonHub Codex auth.json，包含 `auth_mode: "chatgpt"`、`last_refresh` 和 `tokens.access_token/refresh_token/id_token`。缺少真实 `refresh_token` 时会写入 `__missing_refresh_token__` 占位值，方便在 access token 过期前试用；过期后不能自动刷新。
 - `Codex-Manager`：生成 Codex-Manager 批量导入 JSON，包含 `tokens.access_token/refresh_token/id_token` 和 `meta.label/workspace_id/chatgpt_account_id/note`。缺少真实 `refresh_token` 时保留空字符串，避免被 Codex-Manager 误判为可刷新账号。
+
 ChatGPT Web session 通常不包含 OAuth 文件里常见的 `refresh_token`，因此 access token 过期后不能自动刷新。
 
 ## 本地使用
@@ -60,4 +76,4 @@ ChatGPT Web session 通常不包含 OAuth 文件里常见的 `refresh_token`，�
 docs/index.html
 ```
 
-默认转换预览在浏览器内完成，不写入本地存储。只有在填写私有 sub2api URL 和 Bearer Token 并点击导入/刷新时，页面才会向你的 sub2api 后端发送请求；导入后的账号数据由服务器端 sub2api/PostgreSQL 持久化保存。
+本地静态打开时只能做浏览器内转换预览。若要读取服务器已保存账号或导入到 sub2api，需要部署 `server/tokenmanager-bff.js`，并通过同源 `/token-manager-auth/*` 与 `/token-manager-api/*` 访问。

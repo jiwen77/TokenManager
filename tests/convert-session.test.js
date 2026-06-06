@@ -104,10 +104,24 @@ function loadPageScript(overrides = {}) {
         this.type = type;
       }
     },
-    fetch: async () => {
-      throw new Error("fetch is not mocked")
+    fetch: async (url) => {
+      if (String(url) === "/token-manager-auth/me") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ authenticated: false }),
+        };
+      }
+      throw new Error(`fetch is not mocked: ${url}`);
     },
     localStorage: {
+      getItem() {
+        return null;
+      },
+      removeItem() {},
+      setItem() {},
+    },
+    sessionStorage: {
       getItem() {
         return null;
       },
@@ -136,7 +150,11 @@ function loadPageScript(overrides = {}) {
 
 function dispatch(element, type) {
   assert.equal(typeof element.listeners[type], "function", `missing ${type} listener on ${element.selector}`);
-  element.listeners[type]({ target: element });
+  element.listeners[type]({ target: element, preventDefault() {} });
+}
+
+function flushAsync() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function jwtWithPayload(payload) {
@@ -453,8 +471,15 @@ function testCodexManagerAuthJsonPreservesRealRefreshAndMetadata() {
 async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
   const capturedRequests = [];
   const { elements } = loadPageScript({
-    fetch: async (url, options) => {
+    fetch: async (url, options = {}) => {
       capturedRequests.push({ url, options });
+      if (String(url) === "/token-manager-auth/me") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ authenticated: true, expires_at: "2026-08-06T14:29:36.155Z" }),
+        };
+      }
       if (String(url).includes("/admin/accounts?")) {
         return {
           ok: true,
@@ -483,12 +508,12 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
     },
   });
 
+  await flushAsync();
+
   const input = elements.get("#session-input");
-  const output = elements.get("#output");
   const outputStatus = elements.get("#output-status");
   const importButton = elements.get("#import-sub2api");
   const sub2apiUrl = elements.get("#sub2api-url");
-  const sub2apiToken = elements.get("#sub2api-token");
   const accessToken = jwtWithPayload({
     exp: 1780473960,
     "https://api.openai.com/auth": {
@@ -496,8 +521,7 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
     },
   });
 
-  sub2apiUrl.value = "https://sub2api.example.com/api/v1/admin/accounts/data";
-  sub2apiToken.value = "test-token";
+  assert.equal(sub2apiUrl.value, "/token-manager-api/admin/accounts/data");
 
   input.value = JSON.stringify({
     user: {
@@ -508,13 +532,15 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
   dispatch(input, "input");
   dispatch(importButton, "click");
 
-  await new Promise((resolve) => setImmediate(resolve));
+  await flushAsync();
 
-  const capturedRequest = capturedRequests.find((request) => request.options?.method === "POST");
+  const capturedRequest = capturedRequests.find((request) => request.options?.method === "POST" && request.url === "/token-manager-api/admin/accounts/data");
   assert.ok(capturedRequest, "expected import fetch to be called");
-  assert.equal(capturedRequest.url, "https://sub2api.example.com/api/v1/admin/accounts/data");
+  assert.equal(capturedRequest.url, "/token-manager-api/admin/accounts/data");
   assert.equal(capturedRequest.options.method, "POST");
-  assert.equal(capturedRequest.options.headers.Authorization, "Bearer test-token");
+  assert.equal(capturedRequest.options.credentials, "same-origin");
+  assert.equal(capturedRequest.options.headers.Authorization, undefined);
+  assert.equal(capturedRequest.options.headers.authorization, undefined);
 
   const body = JSON.parse(capturedRequest.options.body);
   assert.equal(body.skip_default_group_bind, true);
@@ -525,7 +551,7 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
   assert.equal(body.data.accounts[0].credentials.access_token, accessToken);
   assert.match(outputStatus.textContent, /已导入 sub2api/);
   assert.ok(
-    capturedRequests.some((request) => String(request.url).startsWith("https://sub2api.example.com/api/v1/admin/accounts?")),
+    capturedRequests.some((request) => String(request.url).startsWith("/token-manager-api/admin/accounts?")),
     "successful import should refresh persisted server accounts"
   );
 }
@@ -533,8 +559,15 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
 async function testRefreshServerAccountsFetchesPersistedAccounts() {
   const capturedRequests = [];
   const { elements } = loadPageScript({
-    fetch: async (url, options) => {
+    fetch: async (url, options = {}) => {
       capturedRequests.push({ url, options });
+      if (String(url) === "/token-manager-auth/me") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ authenticated: true }),
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -556,50 +589,53 @@ async function testRefreshServerAccountsFetchesPersistedAccounts() {
     },
   });
 
-  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
-  elements.get("#sub2api-token").value = "test-token";
-
+  await flushAsync();
   dispatch(elements.get("#refresh-server-accounts"), "click");
-  await new Promise((resolve) => setImmediate(resolve));
+  await flushAsync();
 
+  const accountRequest = capturedRequests.find((request) => String(request.url).startsWith("/token-manager-api/admin/accounts?"));
+  assert.ok(accountRequest, "expected account refresh fetch");
   assert.equal(
-    capturedRequests[0].url,
-    "https://sub2api.example.com/api/v1/admin/accounts?page=1&page_size=50&sort_by=created_at&sort_order=desc"
+    accountRequest.url,
+    "/token-manager-api/admin/accounts?page=1&page_size=50&sort_by=created_at&sort_order=desc"
   );
-  assert.equal(capturedRequests[0].options.headers.Authorization, "Bearer test-token");
+  assert.equal(accountRequest.options.credentials, "same-origin");
+  assert.equal(accountRequest.options.headers.Authorization, undefined);
   assert.match(elements.get("#server-account-body").innerHTML, /saved@example\.com/);
   assert.match(elements.get("#server-account-status").textContent, /服务器已保存 1 个账号/);
 }
 
-async function testUrlTokenHydratesBearerAndRefreshesServerAccounts() {
+function testBrowserDoesNotExposeSub2apiBearerControls() {
+  const htmlPath = path.join(__dirname, "..", "docs", "index.html");
+  const html = fs.readFileSync(htmlPath, "utf8");
+
+  assert.equal(html.includes("sub2api-token"), false);
+  assert.equal(/Authorization\s*:\s*`?Bearer/.test(html), false);
+  assert.equal(/localStorage\.(setItem|getItem)\(["']auth_/.test(html), false);
+  assert.equal(/sessionStorage\.(setItem|getItem)/.test(html), false);
+}
+
+async function testUrlTokenDoesNotHydrateBrowserBearerOrRefreshAccounts() {
   const capturedRequests = [];
-  const { elements } = loadPageScript({
+  loadPageScript({
     window: {
       location: {
         search: "?token=url-token",
       },
     },
-    fetch: async (url, options) => {
+    fetch: async (url, options = {}) => {
       capturedRequests.push({ url, options });
       return {
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({
-          data: {
-            items: [],
-            total: 0,
-          },
-        }),
+        text: async () => JSON.stringify({ authenticated: false }),
       };
     },
   });
 
-  await new Promise((resolve) => setImmediate(resolve));
+  await flushAsync();
 
-  assert.equal(elements.get("#sub2api-token").value, "url-token");
-  assert.equal(capturedRequests.length, 1);
-  assert.equal(capturedRequests[0].options.headers.Authorization, "Bearer url-token");
-  assert.match(elements.get("#server-account-status").textContent, /服务器已保存 0 个账号/);
+  assert.deepEqual(capturedRequests.map((request) => request.url), ["/token-manager-auth/me"]);
 }
 
 async function testFetchSub2ApiMetaUsesSub2apiAllEndpoints() {
@@ -607,6 +643,20 @@ async function testFetchSub2ApiMetaUsesSub2apiAllEndpoints() {
   const { elements } = loadPageScript({
     fetch: async (url) => {
       capturedUrls.push(String(url));
+      if (String(url) === "/token-manager-auth/me") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ authenticated: true }),
+        };
+      }
+      if (String(url).includes("/admin/accounts?")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { items: [], total: 0 } }),
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -619,18 +669,53 @@ async function testFetchSub2ApiMetaUsesSub2apiAllEndpoints() {
     },
   });
 
-  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
-  elements.get("#sub2api-token").value = "test-token";
-
+  await flushAsync();
   dispatch(elements.get("#fetch-sub2api-meta"), "click");
-  await new Promise((resolve) => setImmediate(resolve));
+  await flushAsync();
 
-  assert.deepEqual(capturedUrls.sort(), [
-    "https://sub2api.example.com/api/v1/admin/groups/all",
-    "https://sub2api.example.com/api/v1/admin/proxies/all",
+  assert.deepEqual(capturedUrls.filter((url) => url.includes("/admin/groups") || url.includes("/admin/proxies")).sort(), [
+    "/token-manager-api/admin/groups/all",
+    "/token-manager-api/admin/proxies/all",
   ]);
   assert.match(elements.get("#sub2api-groups").innerHTML, /Default Group/);
   assert.match(elements.get("#sub2api-proxy").innerHTML, /Default Proxy/);
+}
+
+async function testTokenManagerLoginUsesHttpOnlySessionFlowWithoutStorage() {
+  const calls = [];
+  const throwingStorage = {
+    getItem() { throw new Error("storage must not be read"); },
+    removeItem() { throw new Error("storage must not be written"); },
+    setItem() { throw new Error("storage must not be written"); },
+  };
+  const { elements } = loadPageScript({
+    localStorage: throwingStorage,
+    sessionStorage: throwingStorage,
+    fetch: async (url, options = {}) => {
+      calls.push({ url, options });
+      if (String(url) === "/token-manager-auth/me") {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ authenticated: false }) };
+      }
+      if (String(url) === "/token-manager-auth/login") {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ authenticated: true, expires_at: "2026-08-06T14:29:36.155Z" }) };
+      }
+      if (String(url).includes("/admin/accounts?")) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ data: { items: [], total: 0 } }) };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+  });
+
+  await flushAsync();
+  elements.get("#tokenmanager-password").value = "login-password";
+  dispatch(elements.get("#tokenmanager-login-form"), "submit");
+  await flushAsync();
+
+  const loginCall = calls.find((call) => call.url === "/token-manager-auth/login");
+  assert.ok(loginCall, "expected login fetch");
+  assert.equal(loginCall.options.credentials, "same-origin");
+  assert.deepEqual(JSON.parse(loginCall.options.body), { password: "login-password" });
+  assert.match(elements.get("#tokenmanager-auth-status").textContent, /已登录服务器/);
 }
 
 async function main() {
@@ -644,10 +729,12 @@ async function main() {
   testCodexAuthJsonPreservesRealRefreshTokenAndIdToken();
   testCodexManagerAuthJsonUsesEmptyRefreshTokenWhenMissing();
   testCodexManagerAuthJsonPreservesRealRefreshAndMetadata();
+  testBrowserDoesNotExposeSub2apiBearerControls();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
   await testRefreshServerAccountsFetchesPersistedAccounts();
-  await testUrlTokenHydratesBearerAndRefreshesServerAccounts();
+  await testUrlTokenDoesNotHydrateBrowserBearerOrRefreshAccounts();
   await testFetchSub2ApiMetaUsesSub2apiAllEndpoints();
+  await testTokenManagerLoginUsesHttpOnlySessionFlowWithoutStorage();
   console.log("convert-session tests passed");
 }
 

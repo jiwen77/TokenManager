@@ -231,11 +231,55 @@ function normalizeFiniteNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function isLocalOrPrivateHost(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "::1" || host === "0.0.0.0") {
+    return true;
+  }
+  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) {
+    return true;
+  }
+  const match = host.match(/^172\.(\d+)\./);
+  return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31);
+}
+
+function getHostnameFromHostPort(value) {
+  const raw = String(value || "").trim();
+  if (raw.startsWith("[")) {
+    const end = raw.indexOf("]");
+    return end > 0 ? raw.slice(1, end) : raw;
+  }
+  return raw.split(":")[0];
+}
+
+function normalizeSub2ApiOrigin(value) {
+  const raw = String(value || "").trim().replace(/\/+$/, "");
+  if (!raw || raw.startsWith("/")) {
+    return "";
+  }
+
+  const candidate = /^https?:\/\//i.test(raw)
+    ? raw
+    : raw.startsWith("//")
+      ? `http:${raw}`
+      : (() => {
+          const host = raw.split(/[/?#]/)[0];
+          const protocol = isLocalOrPrivateHost(getHostnameFromHostPort(host)) ? "http" : "https";
+          return `${protocol}://${raw}`;
+        })();
+
+  try {
+    return new URL(candidate).origin;
+  } catch {
+    return raw;
+  }
+}
+
 function sanitizeRuntimeConfig(value = {}, current = {}) {
   const next = { ...current };
   const origin = String(value.sub2api_default_origin ?? value.sub2apiDefaultOrigin ?? value.sub2api_origin ?? value.sub2apiOrigin ?? "").trim();
   if (origin) {
-    next.sub2apiOrigin = origin;
+    next.sub2apiOrigin = normalizeSub2ApiOrigin(origin);
   }
 
   const importPath = String(value.sub2api_import_path ?? value.sub2apiImportPath ?? "").trim();

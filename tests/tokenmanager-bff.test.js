@@ -247,6 +247,8 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
   });
   const runtimeConfigFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tokenmanager-config-")), "runtime-config.json");
   const bff = await startBff({ runtimeConfigFile }, mock.baseUrl);
+  const mockOrigin = new URL(mock.baseUrl).origin;
+  const bareMockHost = new URL(mock.baseUrl).host;
 
   try {
     const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
@@ -261,7 +263,7 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
       method: "POST",
       headers: { Cookie: cookie, "Content-Type": "application/json" },
       body: JSON.stringify({
-        sub2api_default_origin: new URL(mock.baseUrl).origin,
+        sub2api_default_origin: bareMockHost,
         sub2api_import_path: "/api/v1/admin/accounts/data",
         sub2api_bearer_token: "runtime-bearer-token",
         group_ids: [1, "custom"],
@@ -271,7 +273,7 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
       }),
     });
     assert.equal(saved.response.status, 200);
-    assert.equal(saved.body.sub2api_default_origin, new URL(mock.baseUrl).origin);
+    assert.equal(saved.body.sub2api_default_origin, mockOrigin);
     assert.equal(saved.body.sub2api_has_bearer_token, true);
     assert.deepEqual(saved.body.group_ids, [1, "custom"]);
     assert.equal(saved.body.proxy_id, 7);
@@ -280,6 +282,7 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(saved.body.sub2api_bearer_token, undefined);
 
     const persisted = JSON.parse(fs.readFileSync(runtimeConfigFile, "utf8"));
+    assert.equal(persisted.sub2apiOrigin, mockOrigin);
     assert.equal(persisted.sub2apiBearerToken, "runtime-bearer-token");
 
     const proxied = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts?page=1`, {

@@ -17,6 +17,7 @@ server/runtime-config.*.json
 .omx/
 .codex/
 *.log
+*.swp
 
 # Local research/scratch scripts used during one-off investigation
 fetch_*.py

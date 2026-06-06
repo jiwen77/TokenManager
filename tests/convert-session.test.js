@@ -520,14 +520,33 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ sub2api_default_origin: "https://api.example.com", sub2api_api_base_path: "/custom-api" }),
+        json: async () => ({
+          sub2api_default_origin: "https://api.example.com",
+          sub2api_api_base_path: "/custom-api",
+          group_ids: [1, "custom"],
+          proxy_id: 7,
+          priority: 3,
+          rate_multiplier: 1.5,
+        }),
       };
     },
   });
+  elements.get("#sub2api-groups").options = [
+    { value: "1", selected: false },
+    { value: "custom", selected: false },
+    { value: "other", selected: false },
+  ];
 
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(elements.get("#sub2api-url").value, "https://api.example.com");
+  assert.deepEqual(
+    elements.get("#sub2api-groups").options.map((option) => option.selected),
+    [true, true, false],
+  );
+  assert.equal(elements.get("#sub2api-proxy").value, "7");
+  assert.equal(elements.get("#sub2api-priority").value, "3");
+  assert.equal(elements.get("#sub2api-rate-multiplier").value, "1.5");
 }
 
 async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {

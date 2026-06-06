@@ -120,6 +120,12 @@ function loadPageScript(overrides = {}) {
       },
     },
     setTimeout,
+    URLSearchParams,
+    window: {
+      location: {
+        search: "",
+      },
+    },
     ...overrides,
   };
 
@@ -565,6 +571,37 @@ async function testRefreshServerAccountsFetchesPersistedAccounts() {
   assert.match(elements.get("#server-account-status").textContent, /服务器已保存 1 个账号/);
 }
 
+async function testUrlTokenHydratesBearerAndRefreshesServerAccounts() {
+  const capturedRequests = [];
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        search: "?token=url-token",
+      },
+    },
+    fetch: async (url, options) => {
+      capturedRequests.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          data: {
+            items: [],
+            total: 0,
+          },
+        }),
+      };
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(elements.get("#sub2api-token").value, "url-token");
+  assert.equal(capturedRequests.length, 1);
+  assert.equal(capturedRequests[0].options.headers.Authorization, "Bearer url-token");
+  assert.match(elements.get("#server-account-status").textContent, /服务器已保存 0 个账号/);
+}
+
 async function testFetchSub2ApiMetaUsesSub2apiAllEndpoints() {
   const capturedUrls = [];
   const { elements } = loadPageScript({
@@ -609,6 +646,7 @@ async function main() {
   testCodexManagerAuthJsonPreservesRealRefreshAndMetadata();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
   await testRefreshServerAccountsFetchesPersistedAccounts();
+  await testUrlTokenHydratesBearerAndRefreshesServerAccounts();
   await testFetchSub2ApiMetaUsesSub2apiAllEndpoints();
   console.log("convert-session tests passed");
 }

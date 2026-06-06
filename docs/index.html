@@ -1874,6 +1874,35 @@
           return String(elements.sub2apiToken?.value || "").trim();
         }
 
+        function getUrlParameter(name) {
+          if (typeof window === "undefined" || !window.location) {
+            return "";
+          }
+
+          try {
+            return new URLSearchParams(window.location.search || "").get(name) || "";
+          } catch {
+            return "";
+          }
+        }
+
+        function hydrateSub2ApiBearerTokenFromUrl() {
+          const token = firstNonEmpty(
+            getUrlParameter("token"),
+            getUrlParameter("sub2api_token"),
+            getUrlParameter("bearer_token")
+          );
+
+          if (!token || getSub2ApiBearerToken()) {
+            return false;
+          }
+
+          elements.sub2apiToken.value = token;
+          elements.sub2apiToken.placeholder = "已从访问链接读取 Bearer Token";
+          setStatus(elements.serverAccountStatus, "已从访问链接读取 Bearer Token，可直接刷新服务器账号。", "ok");
+          return true;
+        }
+
         function getSub2ApiAdminBase() {
           const endpoint = getSub2ApiEndpoint()
             .replace(/[?#].*$/, "")
@@ -2265,6 +2294,9 @@
 
         updateOutput();
         renderServerAccounts();
+        if (hydrateSub2ApiBearerTokenFromUrl()) {
+          refreshServerAccounts();
+        }
       })();
     </script>
   </body>

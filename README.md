@@ -8,6 +8,8 @@
 
 建议部署在受保护的私有路径下，例如 `/token-manager/`，并让页面通过同源 `/api/v1/admin/...` 访问 sub2api。
 
+如果私有入口使用 `/token-manager/?token=...` 做访问校验，页面会自动把该 `token` 作为 sub2api Bearer Token 使用，并在打开时刷新服务器已保存账号列表；无需每次手动填写 Bearer Token。该 token 只保存在当前页面内存/输入框中，不写入浏览器本地存储。
+
 ## 使用提示
 
 Plus 号可以用此方式导入中转站使用；Free 号的 access token 不能用于调用接口。

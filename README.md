@@ -9,19 +9,20 @@
 当前推荐部署为：
 
 ```text
-/token-manager/ 先由 Caddy basic_auth 做访问密码门禁
-进入页面后，再在网页内自定义填写 sub2api URL 和 Bearer Token
+/token-manager/ 未登录时由服务器返回页面内密码表单
+密码正确后进入 TokenManager，再在网页内自定义填写 sub2api URL 和 Bearer Token
 ```
 
 也就是说：
 
-- 没有页面访问密码的人不能打开 TokenManager 网页。
-- 页面内的 `sub2api URL`、`Bearer Token`、分组、代理等仍可手动/自定义输入。
+- 没有页面访问密码的人拿不到真正的 TokenManager 工具页面。
+- 登录表单只有密码，不需要用户名，也不会触发浏览器 Basic Auth 弹窗。
+- 进入工具页面后，`sub2api URL`、`Bearer Token`、分组、代理等仍可手动/自定义输入。
 - 转换预览仍在浏览器本地完成，不写入 localStorage/sessionStorage。
 - 点击导入/刷新时，浏览器会把你在页面里填写的 sub2api URL 和 Bearer Token 用于请求 sub2api。
 - 不再支持从 `/token-manager/?token=...` 自动读取 Bearer Token，避免敏感 token 进入浏览器历史、日志或分享链接。
 
-如果以后想改成“浏览器永远看不到 sub2api 管理 token”，仓库里也保留了可选的 `server/tokenmanager-bff.js` 服务端代理方案，说明见 [`server/README.md`](server/README.md)。
+当前页面密码门禁由 `server/tokenmanager-bff.js` 的 auth-only 模式配合 Caddy `forward_auth` 提供；仓库里也保留同一个 BFF 的可选 sub2api 服务端代理模式，说明见 [`server/README.md`](server/README.md)。
 
 ## 使用提示
 

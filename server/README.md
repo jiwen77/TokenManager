@@ -4,7 +4,23 @@
 
 优先使用 `SUB2API_ADMIN_EMAIL` + `SUB2API_ADMIN_PASSWORD` 自动登录并缓存/刷新 sub2api JWT；如果 sub2api 后台登录额外启用了 2FA/Turnstile，推荐使用 sub2api 的 `admin_api_key` 并通过 `SUB2API_ADMIN_API_KEY` 注入 `x-api-key`。也可用 `SUB2API_JWT_SECRET` + 管理员用户 ID/token_version 在服务器侧短期签发 JWT，或用 `SUB2API_ADMIN_BEARER_TOKEN` 作为静态令牌兜底。以上密钥都只保存在服务器，仍不会暴露给浏览器。
 
-## 必要环境变量
+## 页面内密码门禁（auth-only）
+
+如果只想实现“访问 TokenManager 页面前先在页面内输入密码”，使用 auth-only 模式即可；sub2api URL 和 Bearer Token 仍由用户进入页面后手动填写：
+
+```bash
+TOKENMANAGER_AUTH_ONLY=true
+TOKENMANAGER_SESSION_SECRET=<至少32字节随机字符串>
+TOKENMANAGER_PASSWORD_HASH=<node server/tokenmanager-bff.js hash-password 生成>
+TOKENMANAGER_HOST=127.0.0.1
+TOKENMANAGER_PORT=8787
+```
+
+Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-manager-auth/check }`。未登录时 BFF 会返回一个 HTML 密码表单；登录成功后写入 HttpOnly Cookie，再放行静态页面。
+
+## 可选：服务端代理 sub2api 管理接口
+
+如果想让浏览器永远看不到 sub2api 管理 token，再额外配置下面的 sub2api 变量并开放 `/token-manager-api/*` 到 BFF。
 
 ```bash
 TOKENMANAGER_SESSION_SECRET=<至少32字节随机字符串>

@@ -65,6 +65,14 @@ async function fetchJson(url, options = {}) {
   };
 }
 
+async function fetchText(url, options = {}) {
+  const response = await fetch(url, options);
+  return {
+    response,
+    body: await response.text(),
+  };
+}
+
 test("hashPassword creates verifiable scrypt hashes", async () => {
   const encoded = await hashPassword("secret-password", { salt: Buffer.from("1234567890123456"), N: 1024, r: 8, p: 1 });
   assert.match(encoded, /^scrypt:v1:/);
@@ -85,6 +93,39 @@ test("unauthenticated proxy calls are rejected before sub2api is contacted", asy
     assert.equal(response.status, 401);
     assert.equal(body.error, "not_authenticated");
     assert.equal(upstreamCalls, 0);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+
+test("page gate shows an in-page password form and needs no username", async () => {
+  const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());
+  const bff = await startBff({ authOnly: true, sub2apiAdminEmail: "", sub2apiAdminPassword: "" }, mock.baseUrl);
+
+  try {
+    const gate = await fetchText(`${bff.baseUrl}/token-manager-auth/check`);
+    assert.equal(gate.response.status, 401);
+    assert.match(gate.response.headers.get("content-type") || "", /text\/html/);
+    assert.match(gate.body, /TokenManager 访问密码/);
+    assert.match(gate.body, /无需用户名/);
+    assert.doesNotMatch(gate.body, /name=["']username["']/);
+    assert.equal(gate.response.headers.has("www-authenticate"), false);
+
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const allowed = await fetchText(`${bff.baseUrl}/token-manager-auth/check`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(allowed.response.status, 204);
+    assert.equal(allowed.body, "");
   } finally {
     await bff.close();
     await mock.close();

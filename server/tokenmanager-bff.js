@@ -124,6 +124,7 @@ function createConfig(env = process.env) {
   return {
     host: env.TOKENMANAGER_HOST || "127.0.0.1",
     port: parsePositiveInteger(env.TOKENMANAGER_PORT || env.PORT, 8787),
+    authOnly: parseBoolean(env.TOKENMANAGER_AUTH_ONLY, false),
     sub2apiBaseUrl: normalizeBaseUrl(env.SUB2API_BASE_URL),
     sub2apiAdminApiKey: String(env.SUB2API_ADMIN_API_KEY || "").trim(),
     sub2apiAdminBearerToken: String(env.SUB2API_ADMIN_BEARER_TOKEN || env.SUB2API_BEARER_TOKEN || "").trim(),
@@ -157,7 +158,7 @@ function validateRuntimeConfig(config) {
     errors.push("TOKENMANAGER_PASSWORD_HASH is required (TOKENMANAGER_PASSWORD is accepted only for emergency fallback)");
   }
   const canSignSub2ApiJwt = Boolean(config.sub2apiJwtSecret && config.sub2apiAdminUserId && config.sub2apiAdminEmail);
-  if (!config.sub2apiAdminApiKey && !config.sub2apiAdminBearerToken && !canSignSub2ApiJwt) {
+  if (!config.authOnly && !config.sub2apiAdminApiKey && !config.sub2apiAdminBearerToken && !canSignSub2ApiJwt) {
     if (!config.sub2apiAdminEmail) {
       errors.push("SUB2API_ADMIN_EMAIL is required when SUB2API_ADMIN_API_KEY, SUB2API_ADMIN_BEARER_TOKEN, or SUB2API_JWT_SECRET signing is not set");
     }
@@ -336,6 +337,87 @@ function jsonResponse(res, status, payload, headers = {}) {
     ...headers,
   });
   res.end(body);
+}
+
+function htmlResponse(res, status, html, headers = {}) {
+  const body = Buffer.from(html);
+  res.writeHead(status, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Length": body.length,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    ...headers,
+  });
+  res.end(body);
+}
+
+function tokenManagerLoginPage() {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TokenManager 登录</title>
+  <style>
+    :root { color-scheme: light; --bg: #f4efe7; --card: #fffaf2; --text: #172326; --muted: #6f7a7d; --accent: #24505a; --line: #ded4c5; --danger: #9f2d20; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at top, #fff7e8, var(--bg)); color: var(--text); }
+    main { width: min(100%, 420px); border: 1px solid var(--line); border-radius: 20px; background: var(--card); box-shadow: 0 24px 80px rgba(23, 35, 38, 0.14); padding: 26px; }
+    h1 { margin: 0 0 8px; font-size: 1.35rem; }
+    p { margin: 0 0 20px; color: var(--muted); line-height: 1.6; }
+    label { display: block; margin-bottom: 8px; font-weight: 800; color: var(--accent); }
+    input { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 1rem; background: #fff; color: var(--text); }
+    input:focus { outline: 3px solid rgba(36, 80, 90, 0.18); border-color: var(--accent); }
+    button { width: 100%; min-height: 44px; margin-top: 14px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 900; font-size: 1rem; cursor: pointer; }
+    button:disabled { opacity: 0.68; cursor: wait; }
+    .status { min-height: 22px; margin-top: 12px; color: var(--danger); font-size: 0.92rem; }
+    .hint { margin-top: 18px; font-size: 0.86rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>TokenManager 访问密码</h1>
+    <p>请输入页面访问密码。登录成功后才能打开 TokenManager 工具页面。</p>
+    <form id="login-form" autocomplete="off">
+      <label for="password">访问密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" autofocus required />
+      <button id="submit" type="submit">进入 TokenManager</button>
+      <div class="status" id="status" role="status" aria-live="polite"></div>
+    </form>
+    <div class="hint">无需用户名；sub2api URL 和 Bearer Token 进入页面后再自行填写。</div>
+  </main>
+  <script>
+    const form = document.querySelector('#login-form');
+    const password = document.querySelector('#password');
+    const submit = document.querySelector('#submit');
+    const status = document.querySelector('#status');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      status.textContent = '';
+      submit.disabled = true;
+      try {
+        const response = await fetch('/token-manager-auth/login', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ password: password.value }),
+        });
+        if (!response.ok) {
+          status.textContent = response.status === 401 ? '密码不正确。' : '登录失败，请稍后重试。';
+          submit.disabled = false;
+          password.select();
+          return;
+        }
+        window.location.replace('/token-manager/');
+      } catch {
+        status.textContent = '网络错误，请稍后重试。';
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>`;
 }
 
 function methodNotAllowed(res) {
@@ -681,6 +763,27 @@ async function handleAuth(req, res, parsedUrl, context) {
     return;
   }
 
+  if (pathname === "/token-manager-auth/check") {
+    if (req.method !== "GET") return methodNotAllowed(res);
+    const session = sessions.fromRequest(req);
+    if (session) {
+      res.writeHead(204, {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end();
+    } else {
+      htmlResponse(res, 401, tokenManagerLoginPage());
+    }
+    return;
+  }
+
+  if (pathname === "/token-manager-auth/login-page") {
+    if (req.method !== "GET") return methodNotAllowed(res);
+    htmlResponse(res, 200, tokenManagerLoginPage());
+    return;
+  }
+
   if (pathname === "/token-manager-auth/me") {
     if (req.method !== "GET") return methodNotAllowed(res);
     const session = sessions.fromRequest(req);
@@ -756,7 +859,11 @@ function createTokenManagerServer(options = {}) {
         return;
       }
       if (parsedUrl.pathname.startsWith("/token-manager-api/")) {
-        await handleProxy(req, res, parsedUrl, context);
+        if (config.authOnly) {
+          notFound(res);
+        } else {
+          await handleProxy(req, res, parsedUrl, context);
+        }
         return;
       }
       notFound(res);

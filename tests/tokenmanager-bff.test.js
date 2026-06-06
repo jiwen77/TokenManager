@@ -440,6 +440,7 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(saved.response.status, 200);
     assert.equal(saved.body.sub2api_default_origin, mockOrigin);
     assert.equal(saved.body.sub2api_has_bearer_token, true);
+    assert.equal(saved.body.sub2api_bearer_token_preview, "runtim••••••••");
     assert.deepEqual(saved.body.group_ids, [1, "custom"]);
     assert.deepEqual(saved.body.group_options, [{ id: 1, name: "Default Group" }]);
     assert.deepEqual(saved.body.proxy_ids, [7, "pool-b"]);
@@ -459,6 +460,7 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(saved.body.websocket_mode, "passthrough");
     assert.equal(saved.body.auto_passthrough, true);
     assert.equal(saved.body.sub2api_bearer_token, undefined);
+    assert.doesNotMatch(JSON.stringify(saved.body), /runtime-bearer-token/);
 
     const store = new RuntimeConfigStore({
       storageBackend: "sqlite",

@@ -842,6 +842,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
             sub2api_default_origin: "https://remote.example.com",
             sub2api_import_path: "/api/v1/admin/accounts/data",
             sub2api_has_bearer_token: true,
+            sub2api_bearer_token_preview: "runtim••••••••",
             group_ids: [1, "custom"],
             proxy_ids: [7, "pool-b"],
             proxy_id: 7,
@@ -898,6 +899,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   assert.equal(capturedPosts[0].websocket_mode, "ctx_pool");
   assert.equal(capturedPosts[0].auto_passthrough, true);
   assert.equal(elements.get("#sub2api-token").value, "");
+  assert.equal(elements.get("#sub2api-token").placeholder, "已保存：runtim••••••••（留空不覆盖）");
   assert.match(elements.get("#sub2api-config-status").textContent, /保存成功/);
 }
 

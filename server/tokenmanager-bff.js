@@ -261,10 +261,23 @@ function getEffectiveSub2ApiProxyConfig(config, runtimeConfig = {}) {
   };
 }
 
+function createSecretPreview(value, visibleChars = 6) {
+  const token = String(value || "").trim().replace(/^Bearer\s+/i, "");
+  if (!token) {
+    return "";
+  }
+
+  const visibleLength = token.length <= visibleChars
+    ? Math.max(1, Math.floor(token.length / 2))
+    : visibleChars;
+  return `${token.slice(0, visibleLength)}••••••••`;
+}
+
 function buildPublicConfig(config, runtimeConfig = {}) {
   const defaults = config.sub2apiBrowserDefaults || createSub2ApiBrowserDefaults({});
   const importPath = runtimeConfig.sub2apiImportPath || defaults.importPath || "/api/v1/admin/accounts/data";
   const origin = runtimeConfig.sub2apiOrigin || defaults.origin || "";
+  const savedBearerToken = runtimeConfig.sub2apiBearerToken || config.sub2apiAdminBearerToken || "";
   const adminBasePath = getAdminBasePathFromImportPath(importPath);
   const proxyIds = Array.isArray(runtimeConfig.proxyIds)
     ? normalizeSub2ApiSelectionIds(runtimeConfig.proxyIds)
@@ -278,7 +291,8 @@ function buildPublicConfig(config, runtimeConfig = {}) {
     sub2api_import_path: importPath,
     sub2api_api_base_path: adminBasePath,
     sub2api_default_url: origin ? joinUrlParts(origin, adminBasePath) : adminBasePath,
-    sub2api_has_bearer_token: Boolean(runtimeConfig.sub2apiBearerToken || config.sub2apiAdminBearerToken),
+    sub2api_has_bearer_token: Boolean(savedBearerToken),
+    sub2api_bearer_token_preview: createSecretPreview(savedBearerToken),
     sub2api_server_auth_configured: Boolean(runtimeConfig.sub2apiBearerToken || config.sub2apiAdminApiKey || config.sub2apiAdminBearerToken || config.sub2apiJwtSecret || config.sub2apiAdminPassword),
     group_ids: normalizeSub2ApiGroupIds(runtimeConfig.groupIds),
     group_options: normalizeSub2ApiMetaOptions(runtimeConfig.groupOptions),

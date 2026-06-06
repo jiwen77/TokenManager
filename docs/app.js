@@ -1507,7 +1507,10 @@
           elements.websocketMode.value = state.websocketMode;
           state.autoPassthrough = payload.auto_passthrough === true || payload.autoPassthrough === true;
           elements.autoPassthrough.checked = state.autoPassthrough;
-          if (payload.sub2api_has_bearer_token || payload.sub2api_server_auth_configured) {
+          const tokenPreview = firstNonEmpty(payload.sub2api_bearer_token_preview, payload.sub2apiBearerTokenPreview);
+          if (tokenPreview) {
+            elements.sub2apiToken.placeholder = `已保存：${tokenPreview}（留空不覆盖）`;
+          } else if (payload.sub2api_has_bearer_token || payload.sub2api_server_auth_configured) {
             elements.sub2apiToken.placeholder = "服务器已保存认证；留空保存不会覆盖";
           }
           state.selectedGroups = reconcileSelectionsToKnownIds(state.selectedGroups, getKnownGroupItems(), "分组");

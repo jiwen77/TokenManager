@@ -923,6 +923,12 @@
         padding-right: 44px;
       }
 
+      .secret-field input::placeholder {
+        color: #7c8b93;
+        opacity: 1;
+        user-select: none;
+      }
+
       .secret-toggle {
         width: 42px;
         min-height: 42px;

@@ -223,6 +223,11 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
     assert.match(unauthenticatedPage.body, /TokenManager 访问密码/);
     assert.match(unauthenticatedPage.body, /\/token-manager\/auth\/login/);
 
+    const unauthenticatedIcon = await fetchText(`${bff.baseUrl}/token-manager/favicon.svg`);
+    assert.equal(unauthenticatedIcon.response.status, 200);
+    assert.match(unauthenticatedIcon.response.headers.get("content-type") || "", /image\/svg\+xml/);
+    assert.match(unauthenticatedIcon.body, /<svg/);
+
     const login = await fetchJson(`${bff.baseUrl}/token-manager/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

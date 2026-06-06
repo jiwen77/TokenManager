@@ -1102,13 +1102,23 @@ async function handleApp(req, res, parsedUrl, context) {
     return;
   }
 
+  const relativePath = pathname.slice(`${appBasePath}/`.length) || "index.html";
+  if (relativePath === "favicon.svg") {
+    const faviconPath = getSafeStaticFilePath(config.staticDir, relativePath);
+    if (!faviconPath || !fs.existsSync(faviconPath)) {
+      notFound(res);
+      return;
+    }
+    serveStaticFile(req, res, faviconPath);
+    return;
+  }
+
   const session = sessions.fromRequest(req);
   if (!session) {
     htmlResponse(res, 401, tokenManagerLoginPage(), tokenManagerSecurityHeaders());
     return;
   }
 
-  const relativePath = pathname.slice(`${appBasePath}/`.length) || "index.html";
   const staticPath = getSafeStaticFilePath(config.staticDir, relativePath);
   if (!staticPath) {
     notFound(res);

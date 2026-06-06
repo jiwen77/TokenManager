@@ -2,10 +2,6 @@
 
 纯前端单页面工具，用来把 ChatGPT Web 登录 session JSON 转换成 CPA、sub2api、Cockpit Tools、9router、Codex auth.json、AxonHub 或 Codex-Manager 可导入 JSON。
 
-## 在线使用
-
-### [**》》 点我直接使用 《《**](https://gtxx3600.github.io/GPTSession2CPAandSub2API/)
-
 ## 使用提示
 
 Plus 号可以用此方式导入中转站使用；Free 号的 access token 不能用于调用接口。
@@ -15,14 +11,6 @@ Plus 号可以用此方式导入中转站使用；Free 号的 access token 不�
 解释一下： plus激活前（free状态）或激活后（plus状态）获取的session在使用上没有区别（free时拿到的session, 激活plus后就可以调模型了），只是账号级别标识有点区别（标识为free or plus），不影响调模型。 换句话讲，不管你啥时候拿到的session, 用本项目转换导入中转站，只要账号当前激活了plus, 就能正常调模型接口。
 
 本工具主要针对 Plus 账号适用，Free 账号即使转换了也没有权限调用 GPT 模型。GoPay 拉闸了，没法每天发 Plus 了；加入 Discord 频道免费获取 GPT 撸羊毛信息，然后配合本工具导入 CPA or Sub2API 使用。
-
-## GOAPY 拉闸了， Party is OVER ～ 
-## **加入 Discord 频道免费获取 GPT 撸羊毛信息：**
-
-### [**》》 加入 Discord 频道 《《**](https://discord.gg/GFmHY2TZNy)
-
-邀请链接：`https://discord.gg/GFmHY2TZNy`
-
 
 ## 支持输入
 

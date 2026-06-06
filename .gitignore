@@ -12,6 +12,9 @@ auth*.json
 credentials*.json
 server/runtime-config.json
 server/runtime-config.*.json
+server/*.sqlite
+server/*.sqlite-*
+data/
 
 # Agent/runtime state and logs may contain local paths, diagnostics, or secrets
 .omx/

@@ -21,13 +21,21 @@ BFF 在 Hostdzire-LA 服务器上访问 http://127.0.0.1:8080/api/v1 的 sub2api
 - 登录表单只有密码，不需要用户名，也不会触发浏览器 Basic Auth 弹窗。
 - TokenManager 自身登录配置只应放在服务器运行环境：`.env`/systemd `EnvironmentFile` 保存 `TOKENMANAGER_PASSWORD_HASH` 和 `TOKENMANAGER_SESSION_SECRET`，不要保存或提交明文登录密码。
 - 当前 Hostdzire-LA 部署使用服务端代理模式：网页可以填写/保存 sub2api 地址、Bearer Token、分组、代理、优先级和倍率，但实际请求仍由服务器 BFF 发起。
-- sub2api 管理认证保存在服务器 `.env` 或 `server/runtime-config.json`；保存后的 Bearer Token 不会在页面刷新后回显明文。
+- sub2api 管理认证保存在服务器 `.env` 或加密 SQLite 配置库；保存后的 Bearer Token 不会在页面刷新后回显明文。
 - BFF 可以使用服务器本机地址 `http://127.0.0.1:8080/api/v1` 访问 sub2api；这是服务器进程访问，不是浏览器访问。
 - 转换预览仍在浏览器本地完成，不写入 localStorage/sessionStorage。
 - 点击“保存配置”会把 sub2api 地址、Bearer Token 和绑定设置保存到服务器；点击导入/刷新时，浏览器只请求同源 `/token-manager/api/*`，真正的 sub2api 请求由服务器 BFF 完成。
 - 不再支持从 `/token-manager/?token=...` 自动读取 Bearer Token，避免敏感 token 进入浏览器历史、日志或分享链接。
 
 当前 TokenManager 已是单端口 BFF 应用：`server/tokenmanager-bff.js` 同时服务页面、登录/配置接口和 sub2api 服务端代理；Caddy 只需要把 `/token-manager` 入口反代到 BFF，说明见 [`server/README.md`](server/README.md)。
+
+运行时配置默认保存到 SQLite：
+
+```text
+/opt/tokenmanager/data/tokenmanager.sqlite
+```
+
+页面保存的 Bearer Token 会先用 AES-256-GCM 加密再写入 SQLite。旧版 `server/runtime-config.json` 会在第一次启动 SQLite 存储时自动迁移；迁移后建议只保留 root-only 备份或删除旧 JSON。
 
 ## 使用提示
 

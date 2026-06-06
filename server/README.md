@@ -6,7 +6,7 @@
 
 ## 推荐：页面门禁 + 服务端代理模式
 
-Hostdzire-LA 当前应使用服务端代理模式：浏览器只访问 TokenManager，同源请求 `/token-manager/api/*`；BFF 在服务器上访问本机 sub2api。页面里的“保存配置”会写入服务器运行时配置文件，默认是 `server/runtime-config.json`。
+Hostdzire-LA 当前应使用服务端代理模式：浏览器只访问 TokenManager，同源请求 `/token-manager/api/*`；BFF 在服务器上访问本机 sub2api。页面里的“保存配置”会写入 SQLite 配置库，Bearer Token 会加密保存。
 
 ```bash
 TOKENMANAGER_AUTH_ONLY=false
@@ -16,6 +16,10 @@ TOKENMANAGER_HOST=127.0.0.1
 TOKENMANAGER_PORT=8787
 TOKENMANAGER_BASE_PATH=/token-manager
 TOKENMANAGER_STATIC_DIR=/opt/tokenmanager/docs
+TOKENMANAGER_STORAGE_BACKEND=sqlite
+TOKENMANAGER_DATABASE_FILE=/opt/tokenmanager/data/tokenmanager.sqlite
+TOKENMANAGER_ENCRYPTION_KEY=<至少32字节随机字符串，建议独立于 SESSION_SECRET>
+# 旧版 JSON 自动迁移来源；迁移完成后不再写入这个文件。
 TOKENMANAGER_CONFIG_FILE=/opt/tokenmanager/server/runtime-config.json
 
 # BFF 在 Hostdzire-LA 上访问 sub2api，本机地址只给服务器进程用。
@@ -38,13 +42,20 @@ BFF 自己服务 `/token-manager/` 页面、`/token-manager/auth/*` 登录/配�
 - 如需临时留存明文密码用于找回，应放在服务器 root-only 文件或密码管理器中，权限建议 `600`；确认已记录后可以删除该明文文件。
 - `SUB2API_BASE_URL` 是 BFF 服务端代理上游地址，给 Node 在服务器上访问用；这里可以用服务器内网 `127.0.0.1`。
 - `SUB2API_ADMIN_*` / `SUB2API_JWT_SECRET` / `SUB2API_ADMIN_BEARER_TOKEN` 只保存在服务器 `.env`，不要提交到 git。
-- 页面“保存配置”写入 `TOKENMANAGER_CONFIG_FILE` 指向的 JSON；它可能包含 Bearer Token，权限应保持 `600`，也不要提交到 git。
-- `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` / `TOKENMANAGER_SUB2API_IMPORT_PATH` 是页面初始默认值；保存配置后，运行时 JSON 会覆盖这些默认值。
+- 页面“保存配置”写入 `TOKENMANAGER_DATABASE_FILE` 指向的 SQLite；Bearer Token 会用 `TOKENMANAGER_ENCRYPTION_KEY` 加密后保存。若未设置独立 encryption key，会回退使用 `TOKENMANAGER_SESSION_SECRET` 派生密钥。
+- `TOKENMANAGER_CONFIG_FILE` 现在只作为旧版 JSON 自动迁移来源；SQLite 已有数据时不会覆盖 SQLite。
+- `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` / `TOKENMANAGER_SUB2API_IMPORT_PATH` 是页面初始默认值；保存配置后，SQLite 里的运行时配置会覆盖这些默认值。
+
+SQLite 后端不需要 npm 依赖。Node 进程通过系统 `python3` 的标准库 `sqlite3` 访问数据库；如 Python 不在默认路径，可设置：
+
+```bash
+TOKENMANAGER_PYTHON=/usr/bin/python3
+```
 
 
 ## 页面保存配置
 
-登录 TokenManager 后，页面里的“保存配置”会持久化这些字段到服务器运行时配置文件：
+登录 TokenManager 后，页面里的“保存配置”会持久化这些字段到服务器 SQLite 配置库：
 
 - sub2api 服务器地址
 - Bearer Token（如输入；留空保存会继续沿用服务器已有认证）
@@ -53,7 +64,7 @@ BFF 自己服务 `/token-manager/` 页面、`/token-manager/auth/*` 登录/配�
 - Priority
 - Rate Multiplier
 
-保存后的 Bearer Token 不会通过 `/token-manager/auth/config` 明文返回给页面；页面只会知道服务器端已有认证。
+保存后的 Bearer Token 不会通过 `/token-manager/auth/config` 明文返回给页面；页面只会知道服务器端已有认证。SQLite 文件里也不会保存 Bearer Token 明文。
 
 ## 可选：浏览器直连模式默认地址字段
 
@@ -103,6 +114,9 @@ TOKENMANAGER_HOST=127.0.0.1
 TOKENMANAGER_PORT=8787
 TOKENMANAGER_BASE_PATH=/token-manager
 TOKENMANAGER_STATIC_DIR=/opt/tokenmanager/docs
+TOKENMANAGER_STORAGE_BACKEND=sqlite
+TOKENMANAGER_DATABASE_FILE=/opt/tokenmanager/data/tokenmanager.sqlite
+TOKENMANAGER_ENCRYPTION_KEY=<至少32字节随机字符串>
 ```
 
 生成登录密码哈希（避免把明文密码写入 shell 历史）：
@@ -112,6 +126,18 @@ printf '%s' '你的登录密码' | node server/tokenmanager-bff.js hash-password
 ```
 
 生产环境建议由 systemd `EnvironmentFile=` 或仅服务器上的 `.env` 提供变量；不要提交 `.env`。TokenManager 登录密码只写入 `TOKENMANAGER_PASSWORD_HASH` 的哈希值，明文密码应放入密码管理器或 root-only 临时文件，不应放进 `.env`。
+
+## 旧版 JSON 到 SQLite 迁移
+
+默认 `TOKENMANAGER_STORAGE_BACKEND=sqlite`。启动时如果 SQLite 为空且 `TOKENMANAGER_CONFIG_FILE` 指向的旧版 JSON 存在，BFF 会自动读取旧 JSON、归一化地址，并把配置写入 SQLite；其中 `sub2apiBearerToken` 会加密为 `sub2apiBearerTokenEncrypted`。
+
+迁移后可以检查：
+
+```bash
+test -f /opt/tokenmanager/data/tokenmanager.sqlite
+```
+
+确认服务正常后，旧 `runtime-config.json` 建议只保留 root-only 备份或删除，避免遗留明文 Bearer Token。
 
 ## Caddy 路由
 

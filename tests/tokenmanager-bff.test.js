@@ -7,7 +7,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
-const { createSub2ApiBrowserDefaults, createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, verifyPasswordHash } = require("../server/tokenmanager-bff");
+const { RuntimeConfigStore, createSub2ApiBrowserDefaults, createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, verifyPasswordHash } = require("../server/tokenmanager-bff");
 
 function listen(server) {
   return new Promise((resolve) => {
@@ -35,6 +35,7 @@ async function startMockSub2Api(handler) {
 }
 
 async function startBff(configOverrides = {}, sub2apiBaseUrl) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokenmanager-bff-"));
   const config = {
     host: "127.0.0.1",
     port: 0,
@@ -54,6 +55,11 @@ async function startBff(configOverrides = {}, sub2apiBaseUrl) {
     upstreamTimeoutMs: 5000,
     sub2apiBrowserDefaults: { origin: "", adminBasePath: "/api/v1", apiBasePath: "/api/v1", importPath: "/api/v1/admin/accounts/data", defaultUrl: "" },
     staticDir: path.join(__dirname, "..", "docs"),
+    storageBackend: "sqlite",
+    databaseFile: path.join(tempDir, "tokenmanager.sqlite"),
+    encryptionKey: "test-session-secret-that-is-long-enough-12345",
+    pythonBin: "python3",
+    runtimeConfigFile: path.join(tempDir, "runtime-config.json"),
     ...configOverrides,
   };
   const server = createTokenManagerServer({ config, logger: { info() {}, warn() {}, error() {} } });
@@ -308,8 +314,9 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ data: { items: [], total: 0 } }));
   });
-  const runtimeConfigFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tokenmanager-config-")), "runtime-config.json");
-  const bff = await startBff({ runtimeConfigFile }, mock.baseUrl);
+  const runtimeConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokenmanager-config-"));
+  const databaseFile = path.join(runtimeConfigDir, "tokenmanager.sqlite");
+  const bff = await startBff({ databaseFile }, mock.baseUrl);
   const mockOrigin = new URL(mock.baseUrl).origin;
   const bareMockHost = new URL(mock.baseUrl).host;
 
@@ -344,9 +351,17 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(saved.body.rate_multiplier, 1.5);
     assert.equal(saved.body.sub2api_bearer_token, undefined);
 
-    const persisted = JSON.parse(fs.readFileSync(runtimeConfigFile, "utf8"));
+    const store = new RuntimeConfigStore({
+      storageBackend: "sqlite",
+      databaseFile,
+      encryptionKey: "test-session-secret-that-is-long-enough-12345",
+      pythonBin: "python3",
+    });
+    const persisted = store.read();
     assert.equal(persisted.sub2apiOrigin, mockOrigin);
     assert.equal(persisted.sub2apiBearerToken, "runtime-bearer-token");
+    const rawDatabase = fs.readFileSync(databaseFile);
+    assert.equal(rawDatabase.includes(Buffer.from("runtime-bearer-token")), false);
 
     const proxied = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts?page=1`, {
       headers: { Cookie: cookie },
@@ -360,6 +375,38 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     await bff.close();
     await mock.close();
   }
+});
+
+test("sqlite runtime config migrates legacy JSON and encrypts bearer token", () => {
+  const runtimeConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokenmanager-migrate-"));
+  const runtimeConfigFile = path.join(runtimeConfigDir, "runtime-config.json");
+  const databaseFile = path.join(runtimeConfigDir, "tokenmanager.sqlite");
+  fs.writeFileSync(runtimeConfigFile, JSON.stringify({
+    sub2apiOrigin: "127.0.0.1:8080",
+    sub2apiImportPath: "/api/v1/admin/accounts/data",
+    sub2apiBearerToken: "legacy-secret-token",
+    groupIds: [1, "custom"],
+    proxyId: 7,
+    priority: 3,
+    rateMultiplier: 1.5,
+  }));
+
+  const store = new RuntimeConfigStore({
+    storageBackend: "sqlite",
+    databaseFile,
+    runtimeConfigFile,
+    encryptionKey: "test-session-secret-that-is-long-enough-12345",
+    pythonBin: "python3",
+  });
+
+  const migrated = store.read();
+  assert.equal(migrated.sub2apiOrigin, "http://127.0.0.1:8080");
+  assert.equal(migrated.sub2apiBearerToken, "legacy-secret-token");
+  assert.deepEqual(migrated.groupIds, [1, "custom"]);
+  assert.equal(migrated.proxyId, 7);
+  assert.equal(migrated.priority, 3);
+  assert.equal(migrated.rateMultiplier, 1.5);
+  assert.equal(fs.readFileSync(databaseFile).includes(Buffer.from("legacy-secret-token")), false);
 });
 
 

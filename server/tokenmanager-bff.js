@@ -6,6 +6,11 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const { URL } = require("node:url");
+const {
+  RuntimeConfigStore,
+  normalizeFiniteNumber,
+  normalizeSub2ApiGroupIds,
+} = require("./lib/runtime-config-store");
 
 const DEFAULT_SUB2API_BASE_URL = "http://127.0.0.1:8080/api/v1";
 const DEFAULT_COOKIE_NAME = "__Host-tokenmanager-session";
@@ -211,151 +216,19 @@ function createSub2ApiBrowserDefaultUrl(env = process.env) {
   return createSub2ApiBrowserDefaults(env).defaultUrl;
 }
 
-
-function normalizeSub2ApiSelectionId(value) {
-  if (value === undefined || value === null || value === "") {
-    return null;
+function databaseFileFromEnv(env = process.env) {
+  const explicit = String(env.TOKENMANAGER_DATABASE_FILE || env.TOKENMANAGER_DB_FILE || "").trim();
+  if (explicit) {
+    return explicit;
   }
-  const stringValue = String(value).trim();
-  return /^\d+$/.test(stringValue) ? Number.parseInt(stringValue, 10) : stringValue;
-}
-
-function normalizeSub2ApiGroupIds(value) {
-  if (!Array.isArray(value)) {
-    return [];
+  const databaseUrl = String(env.DATABASE_URL || "").trim();
+  if (!databaseUrl) {
+    return path.join(__dirname, "tokenmanager.sqlite");
   }
-  return value
-    .map(normalizeSub2ApiSelectionId)
-    .filter((item) => item !== null);
-}
-
-function normalizeFiniteNumber(value, fallback) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function isLocalOrPrivateHost(hostname) {
-  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host === "::1" || host === "0.0.0.0") {
-    return true;
+  if (databaseUrl.startsWith("file:")) {
+    return databaseUrl.slice("file:".length);
   }
-  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) {
-    return true;
-  }
-  const match = host.match(/^172\.(\d+)\./);
-  return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31);
-}
-
-function getHostnameFromHostPort(value) {
-  const raw = String(value || "").trim();
-  if (raw.startsWith("[")) {
-    const end = raw.indexOf("]");
-    return end > 0 ? raw.slice(1, end) : raw;
-  }
-  return raw.split(":")[0];
-}
-
-function normalizeSub2ApiOrigin(value) {
-  const raw = String(value || "").trim().replace(/\/+$/, "");
-  if (!raw || raw.startsWith("/")) {
-    return "";
-  }
-
-  const candidate = /^https?:\/\//i.test(raw)
-    ? raw
-    : raw.startsWith("//")
-      ? `http:${raw}`
-      : (() => {
-          const host = raw.split(/[/?#]/)[0];
-          const protocol = isLocalOrPrivateHost(getHostnameFromHostPort(host)) ? "http" : "https";
-          return `${protocol}://${raw}`;
-        })();
-
-  try {
-    return new URL(candidate).origin;
-  } catch {
-    return raw;
-  }
-}
-
-function sanitizeRuntimeConfig(value = {}, current = {}) {
-  const next = { ...current };
-  const origin = String(value.sub2api_default_origin ?? value.sub2apiDefaultOrigin ?? value.sub2api_origin ?? value.sub2apiOrigin ?? "").trim();
-  if (origin) {
-    next.sub2apiOrigin = normalizeSub2ApiOrigin(origin);
-  }
-
-  const importPath = String(value.sub2api_import_path ?? value.sub2apiImportPath ?? "").trim();
-  if (importPath) {
-    next.sub2apiImportPath = normalizePublicPath(importPath, "/api/v1/admin/accounts/data");
-  }
-
-  if (value.clear_sub2api_bearer_token === true || value.clearSub2apiBearerToken === true) {
-    delete next.sub2apiBearerToken;
-  } else {
-    const bearerToken = String(value.sub2api_bearer_token ?? value.sub2apiBearerToken ?? "").trim();
-    if (bearerToken) {
-      next.sub2apiBearerToken = bearerToken.replace(/^Bearer\s+/i, "");
-    }
-  }
-
-  if (Object.prototype.hasOwnProperty.call(value, "group_ids") || Object.prototype.hasOwnProperty.call(value, "groupIds")) {
-    next.groupIds = normalizeSub2ApiGroupIds(value.group_ids ?? value.groupIds);
-  }
-
-  if (Object.prototype.hasOwnProperty.call(value, "proxy_id") || Object.prototype.hasOwnProperty.call(value, "proxyId")) {
-    next.proxyId = normalizeSub2ApiSelectionId(value.proxy_id ?? value.proxyId);
-  }
-
-  if (Object.prototype.hasOwnProperty.call(value, "priority")) {
-    next.priority = normalizeFiniteNumber(value.priority, current.priority ?? 1);
-  }
-
-  if (Object.prototype.hasOwnProperty.call(value, "rate_multiplier") || Object.prototype.hasOwnProperty.call(value, "rateMultiplier")) {
-    next.rateMultiplier = normalizeFiniteNumber(value.rate_multiplier ?? value.rateMultiplier, current.rateMultiplier ?? 1);
-  }
-
-  next.updatedAt = new Date().toISOString();
-  return next;
-}
-
-class RuntimeConfigStore {
-  constructor(filePath) {
-    this.filePath = filePath;
-  }
-
-  read() {
-    if (!this.filePath || !fs.existsSync(this.filePath)) {
-      return {};
-    }
-    try {
-      return sanitizeRuntimeConfig(JSON.parse(fs.readFileSync(this.filePath, "utf8")), {});
-    } catch {
-      return {};
-    }
-  }
-
-  write(value) {
-    if (!this.filePath) {
-      return value;
-    }
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    const tmp = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-    fs.renameSync(tmp, this.filePath);
-    try {
-      fs.chmodSync(this.filePath, 0o600);
-    } catch {
-      // Best effort on filesystems that do not support chmod.
-    }
-    return value;
-  }
-
-  update(patch) {
-    const current = this.read();
-    const next = sanitizeRuntimeConfig(patch, current);
-    return this.write(next);
-  }
+  return databaseUrl;
 }
 
 function getEffectiveSub2ApiProxyConfig(config, runtimeConfig = {}) {
@@ -427,6 +300,10 @@ function createConfig(env = process.env) {
     cookiePath: env.TOKENMANAGER_COOKIE_PATH || "/",
     appBasePath: normalizePublicPath(env.TOKENMANAGER_BASE_PATH || DEFAULT_APP_BASE_PATH, DEFAULT_APP_BASE_PATH).replace(/\/+$/, "") || DEFAULT_APP_BASE_PATH,
     staticDir: path.resolve(env.TOKENMANAGER_STATIC_DIR || path.join(__dirname, "..", "docs")),
+    storageBackend: String(env.TOKENMANAGER_STORAGE_BACKEND || "sqlite").trim().toLowerCase(),
+    databaseFile: path.resolve(databaseFileFromEnv(env)),
+    encryptionKey: String(env.TOKENMANAGER_ENCRYPTION_KEY || env.TOKENMANAGER_SESSION_SECRET || ""),
+    pythonBin: String(env.TOKENMANAGER_PYTHON || "python3"),
     runtimeConfigFile: env.TOKENMANAGER_CONFIG_FILE || path.join(__dirname, "runtime-config.json"),
     maxBodyBytes: parsePositiveInteger(env.TOKENMANAGER_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES),
     upstreamTimeoutMs: parsePositiveInteger(env.TOKENMANAGER_UPSTREAM_TIMEOUT_MS, 30000),
@@ -440,6 +317,12 @@ function validateRuntimeConfig(config) {
   }
   if (!config.loginPasswordHash && !config.loginPassword) {
     errors.push("TOKENMANAGER_PASSWORD_HASH is required (TOKENMANAGER_PASSWORD is accepted only for emergency fallback)");
+  }
+  if (!["sqlite", "json"].includes(config.storageBackend)) {
+    errors.push("TOKENMANAGER_STORAGE_BACKEND must be sqlite or json");
+  }
+  if (config.storageBackend === "sqlite" && !config.encryptionKey) {
+    errors.push("TOKENMANAGER_ENCRYPTION_KEY or TOKENMANAGER_SESSION_SECRET is required for sqlite runtime config storage");
   }
   const canSignSub2ApiJwt = Boolean(config.sub2apiJwtSecret && config.sub2apiAdminUserId && config.sub2apiAdminEmail);
   if (!config.authOnly && !config.sub2apiAdminApiKey && !config.sub2apiAdminBearerToken && !canSignSub2ApiJwt) {
@@ -1313,7 +1196,7 @@ function createTokenManagerServer(options = {}) {
   const logger = options.logger || console;
   const sessions = options.sessions || new SessionManager(config);
   const tokenManager = options.tokenManager || new Sub2ApiTokenManager(config, logger);
-  const runtimeConfigStore = options.runtimeConfigStore || new RuntimeConfigStore(config.runtimeConfigFile);
+  const runtimeConfigStore = options.runtimeConfigStore || new RuntimeConfigStore(config);
   const context = { config, logger, sessions, tokenManager, runtimeConfigStore };
 
   return http.createServer(async (req, res) => {

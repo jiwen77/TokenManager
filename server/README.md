@@ -16,9 +16,8 @@ TOKENMANAGER_HOST=127.0.0.1
 TOKENMANAGER_PORT=8787
 # 页面内 sub2api 服务器地址输入框的默认值，只放域名或 ip:端口。
 TOKENMANAGER_SUB2API_DEFAULT_ORIGIN=https://api.wenlab.link
-# API base path 与导入接口路径由服务器自动拼接，不需要用户在网页里填写。
-TOKENMANAGER_SUB2API_API_BASE_PATH=/api/v1
-TOKENMANAGER_SUB2API_IMPORT_PATH=/admin/accounts/data
+# 完整导入接口路径；用户不需要在网页里填写这段。
+TOKENMANAGER_SUB2API_IMPORT_PATH=/api/v1/admin/accounts/data
 ```
 
 Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-manager-auth/check }`。未登录时 BFF 会返回一个 HTML 密码表单；登录成功后写入 HttpOnly Cookie，再放行静态页面。
@@ -29,7 +28,7 @@ Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-ma
 - 不要把 TokenManager 明文登录密码写入 `.env`，更不要提交到 git；服务校验只需要哈希。
 - 如需临时留存明文密码用于找回，应放在服务器 root-only 文件或密码管理器中，权限建议 `600`；确认已记录后可以删除该明文文件。
 - `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` 只控制网页里 sub2api 服务器地址输入框的默认值，不包含 Bearer Token，也不会把任何 token 暴露给浏览器。
-- `TOKENMANAGER_SUB2API_API_BASE_PATH` 和 `TOKENMANAGER_SUB2API_IMPORT_PATH` 控制自动补齐的后续路径，用户无需在网页里填写。
+- `TOKENMANAGER_SUB2API_IMPORT_PATH` 控制自动补齐的完整导入接口路径；BFF 会从它自动推导 `/api/v1` 去刷新账号、分组和代理元数据。
 - `SUB2API_BASE_URL` 是 BFF 服务端代理上游地址，给 Node 在服务器上访问用；网页输入框默认值请用 `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN`，不要直接拿服务器内网 `127.0.0.1` 当浏览器默认地址。
 
 ## 页面 sub2api 默认地址字段
@@ -38,15 +37,22 @@ Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-ma
 |---|---|---|
 | `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` | 页面输入框默认显示的服务器地址，只放域名或 `ip:端口` | `https://api.wenlab.link`、`https://1.2.3.4:8443` |
 | `TOKENMANAGER_SUB2API_DEFAULT_HOST` | `TOKENMANAGER_SUB2API_DEFAULT_ORIGIN` 的兼容别名 | `https://api.example.com` |
-| `TOKENMANAGER_SUB2API_API_BASE_PATH` | 自动拼接的 API base path | `/api/v1` |
-| `TOKENMANAGER_SUB2API_IMPORT_PATH` | 自动拼接的导入接口路径 | `/admin/accounts/data` |
-| `TOKENMANAGER_SUB2API_DEFAULT_URL` | 旧版兼容字段；会被拆成 origin + API path | `https://api.example.com/api/v1` |
+| `TOKENMANAGER_SUB2API_IMPORT_PATH` | 自动补齐的完整导入接口路径 | `/api/v1/admin/accounts/data` |
+| `TOKENMANAGER_SUB2API_DEFAULT_URL` | 旧版兼容字段；会被拆成 origin + import path | `https://api.example.com/api/v1/admin/accounts/data` |
 
 页面输入框显示 `https://api.wenlab.link` 时，实际导入请求会自动拼成：
 
 ```text
 https://api.wenlab.link/api/v1/admin/accounts/data
 ```
+
+刷新账号、分组、代理时，BFF/前端会从完整导入路径自动推导 admin base：
+
+```text
+/api/v1/admin/accounts/data -> /api/v1
+```
+
+所以通常不需要单独维护 `TOKENMANAGER_SUB2API_API_BASE_PATH`。旧版配置里如果还存在这个字段，程序仍会兼容读取，但新部署不推荐再写。
 
 如果你的 sub2api 只有 HTTP，没有 HTTPS，建议通过 Caddy 同域反代后使用 HTTPS 服务器地址，避免浏览器 Mixed Content/CORS 问题。
 

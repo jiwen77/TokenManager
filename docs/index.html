@@ -982,7 +982,7 @@
                 </div>
               </div>
 
-              <div class="config-hint" style="margin-top: 10px;">只需填写 sub2api 的服务器地址（域名或 ip:端口）；API 路径和导入路径由服务器 .env 自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。</div>
+              <div class="config-hint" style="margin-top: 10px;">只需填写 sub2api 的服务器地址（域名或 ip:端口）；完整导入路径由服务器 .env 自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。</div>
             </div>
             <section class="server-accounts-card" aria-labelledby="server-accounts-title">
               <div class="server-accounts-head">
@@ -1956,10 +1956,10 @@
           }
         }
 
-        const DEFAULT_SUB2API_API_BASE = "/api/v1";
-        const DEFAULT_SUB2API_IMPORT_PATH = "/admin/accounts/data";
+        const DEFAULT_SUB2API_ADMIN_BASE = "/api/v1";
+        const DEFAULT_SUB2API_IMPORT_PATH = "/api/v1/admin/accounts/data";
         const sub2apiBrowserConfig = {
-          apiBasePath: DEFAULT_SUB2API_API_BASE,
+          adminBasePath: DEFAULT_SUB2API_ADMIN_BASE,
           importPath: DEFAULT_SUB2API_IMPORT_PATH,
         };
 
@@ -1988,13 +1988,19 @@
           return raw.startsWith("/") ? raw : `/${raw}`;
         }
 
-        function stripPathSuffix(value, suffix) {
-          const normalized = normalizePublicPath(value, "/").replace(/\/+$/, "") || "/";
-          const normalizedSuffix = normalizePublicPath(suffix, "").replace(/\/+$/, "");
-          if (normalizedSuffix && normalized.endsWith(normalizedSuffix)) {
-            return normalized.slice(0, -normalizedSuffix.length).replace(/\/+$/, "") || "/";
+        function getAdminBasePathFromImportPath(value) {
+          const normalized = normalizePublicPath(value, DEFAULT_SUB2API_IMPORT_PATH).replace(/\/+$/, "") || "/";
+          const adminIndex = normalized.lastIndexOf("/admin/");
+          if (adminIndex > 0) {
+            return normalized.slice(0, adminIndex) || "/";
           }
-          return normalized;
+          return normalized.replace(/\/admin\/accounts\/data$/, "") || "/";
+        }
+
+        function getImportSuffixFromImportPath(value) {
+          const importPath = normalizePublicPath(value, DEFAULT_SUB2API_IMPORT_PATH).replace(/\/+$/, "");
+          const adminBasePath = getAdminBasePathFromImportPath(importPath).replace(/\/+$/, "");
+          return normalizePublicPath(importPath.slice(adminBasePath.length), "/admin/accounts/data");
         }
 
         function normalizeUrlLikeInput(value) {
@@ -2024,27 +2030,55 @@
         function splitSub2ApiAddress(value) {
           const normalized = normalizeUrlLikeInput(value);
           if (!normalized) {
-            return { origin: getCurrentBrowserOrigin(), apiBasePath: sub2apiBrowserConfig.apiBasePath };
+            return {
+              origin: getCurrentBrowserOrigin(),
+              adminBasePath: sub2apiBrowserConfig.adminBasePath,
+              importPath: sub2apiBrowserConfig.importPath,
+            };
           }
 
           if (normalized.startsWith("/")) {
+            const hasAdminPath = normalized.includes("/admin/");
+            const adminBasePath = hasAdminPath
+              ? getAdminBasePathFromImportPath(normalized)
+              : normalized;
             return {
               origin: "",
-              apiBasePath: stripPathSuffix(normalized, sub2apiBrowserConfig.importPath),
+              adminBasePath,
+              importPath: hasAdminPath
+                ? normalizePublicPath(normalized, DEFAULT_SUB2API_IMPORT_PATH)
+                : joinUrlPath(adminBasePath, getImportSuffixFromImportPath(sub2apiBrowserConfig.importPath)),
             };
           }
 
           try {
             const parsed = new URL(normalized);
             const hasPath = parsed.pathname && parsed.pathname !== "/";
+            if (!hasPath) {
+              return {
+                origin: parsed.origin,
+                adminBasePath: sub2apiBrowserConfig.adminBasePath,
+                importPath: sub2apiBrowserConfig.importPath,
+              };
+            }
+
+            const hasAdminPath = parsed.pathname.includes("/admin/");
+            const adminBasePath = hasAdminPath
+              ? getAdminBasePathFromImportPath(parsed.pathname)
+              : parsed.pathname;
             return {
               origin: parsed.origin,
-              apiBasePath: hasPath
-                ? stripPathSuffix(parsed.pathname, sub2apiBrowserConfig.importPath)
-                : sub2apiBrowserConfig.apiBasePath,
+              adminBasePath,
+              importPath: hasAdminPath
+                ? normalizePublicPath(parsed.pathname, DEFAULT_SUB2API_IMPORT_PATH)
+                : joinUrlPath(adminBasePath, getImportSuffixFromImportPath(sub2apiBrowserConfig.importPath)),
             };
           } catch {
-            return { origin: normalized, apiBasePath: sub2apiBrowserConfig.apiBasePath };
+            return {
+              origin: normalized,
+              adminBasePath: sub2apiBrowserConfig.adminBasePath,
+              importPath: sub2apiBrowserConfig.importPath,
+            };
           }
         }
 
@@ -2052,13 +2086,18 @@
           return String(elements.sub2apiToken?.value || "").trim();
         }
 
+        function getSub2ApiUrlParts() {
+          return splitSub2ApiAddress(elements.sub2apiUrl?.value);
+        }
+
         function getSub2ApiAdminBase() {
-          const { origin, apiBasePath } = splitSub2ApiAddress(elements.sub2apiUrl?.value);
-          return origin ? joinUrlPath(origin, apiBasePath) : apiBasePath;
+          const { origin, adminBasePath } = getSub2ApiUrlParts();
+          return origin ? joinUrlPath(origin, adminBasePath) : adminBasePath;
         }
 
         function getSub2ApiEndpoint() {
-          return joinUrlPath(getSub2ApiAdminBase(), sub2apiBrowserConfig.importPath);
+          const { origin, importPath } = getSub2ApiUrlParts();
+          return origin ? joinUrlPath(origin, importPath) : importPath;
         }
 
         function getSub2ApiAdminUrl(path) {
@@ -2071,13 +2110,14 @@
         }
 
         function hydrateSub2ApiBrowserConfig(payload) {
-          sub2apiBrowserConfig.apiBasePath = normalizePublicPath(
-            firstNonEmpty(payload.sub2api_api_base_path, payload.sub2apiApiBasePath),
-            DEFAULT_SUB2API_API_BASE,
-          );
-          sub2apiBrowserConfig.importPath = normalizePublicPath(
+          const configuredImportPath = normalizePublicPath(
             firstNonEmpty(payload.sub2api_import_path, payload.sub2apiImportPath),
             DEFAULT_SUB2API_IMPORT_PATH,
+          );
+          sub2apiBrowserConfig.importPath = configuredImportPath;
+          sub2apiBrowserConfig.adminBasePath = normalizePublicPath(
+            firstNonEmpty(payload.sub2api_admin_base_path, payload.sub2apiAdminBasePath, payload.sub2api_api_base_path, payload.sub2apiApiBasePath),
+            getAdminBasePathFromImportPath(configuredImportPath),
           );
 
           const defaultOrigin = firstNonEmpty(
@@ -2092,11 +2132,11 @@
           // Backward compatibility for older BFF config payloads.
           const legacyDefaultUrl = firstNonEmpty(payload.sub2api_default_url, payload.sub2apiDefaultUrl);
           if (legacyDefaultUrl && !elements.sub2apiUrl.dataset.userEdited) {
-            const { origin, apiBasePath } = splitSub2ApiAddress(legacyDefaultUrl);
+            const { origin, adminBasePath } = splitSub2ApiAddress(legacyDefaultUrl);
             if (origin) {
               elements.sub2apiUrl.value = origin;
-            } else if (apiBasePath && apiBasePath !== DEFAULT_SUB2API_API_BASE) {
-              elements.sub2apiUrl.value = apiBasePath;
+            } else if (adminBasePath && adminBasePath !== DEFAULT_SUB2API_ADMIN_BASE) {
+              elements.sub2apiUrl.value = adminBasePath;
             }
           }
         }

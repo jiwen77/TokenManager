@@ -133,34 +133,31 @@ function normalizePublicPath(value, fallback = "/api/v1") {
   return raw.startsWith("/") ? raw : `/${raw}`;
 }
 
-function stripPathSuffix(value, suffix) {
-  const normalized = normalizePublicPath(value, "/").replace(/\/+$/, "") || "/";
-  const normalizedSuffix = normalizePublicPath(suffix, "").replace(/\/+$/, "");
-  if (normalizedSuffix && normalized.endsWith(normalizedSuffix)) {
-    return normalized.slice(0, -normalizedSuffix.length).replace(/\/+$/, "") || "/";
+function getAdminBasePathFromImportPath(value) {
+  const normalized = normalizePublicPath(value, "/api/v1/admin/accounts/data").replace(/\/+$/, "") || "/";
+  const adminIndex = normalized.lastIndexOf("/admin/");
+  if (adminIndex > 0) {
+    return normalized.slice(0, adminIndex) || "/";
   }
-  return normalized;
+  return normalized.replace(/\/admin\/accounts\/data$/, "") || "/";
 }
 
-function splitBrowserDefaultUrl(value, importPath) {
+function splitBrowserDefaultUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) {
     return {};
   }
 
   if (raw.startsWith("/")) {
-    return { apiBasePath: stripPathSuffix(raw, importPath) };
+    return { importPath: normalizePublicPath(raw, "/api/v1/admin/accounts/data") };
   }
 
   const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
   try {
     const parsed = new URL(candidate);
-    const pathName = parsed.pathname && parsed.pathname !== "/"
-      ? stripPathSuffix(parsed.pathname, importPath)
-      : undefined;
     return {
       origin: /^https?:\/\//i.test(raw) ? parsed.origin : raw.split(/[/?#]/)[0],
-      apiBasePath: pathName,
+      importPath: parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : undefined,
     };
   } catch {
     return { origin: raw };
@@ -168,25 +165,42 @@ function splitBrowserDefaultUrl(value, importPath) {
 }
 
 function createSub2ApiBrowserDefaults(env = process.env) {
-  const importPath = normalizePublicPath(env.TOKENMANAGER_SUB2API_IMPORT_PATH, "/admin/accounts/data");
-  let apiBasePath = normalizePublicPath(
+  const legacyApiBasePath = normalizePublicPath(
     env.TOKENMANAGER_SUB2API_API_BASE_PATH || env.TOKENMANAGER_SUB2API_DEFAULT_PATH,
     "/api/v1",
   );
+  const configuredImportPath = env.TOKENMANAGER_SUB2API_IMPORT_PATH;
+  let importPath = configuredImportPath
+    ? normalizePublicPath(configuredImportPath, "/api/v1/admin/accounts/data")
+    : joinUrlParts(legacyApiBasePath, "/admin/accounts/data");
+
+  // Backward compatibility: older configs stored only the suffix in
+  // TOKENMANAGER_SUB2API_IMPORT_PATH and the API prefix separately.
+  if (configuredImportPath && importPath.startsWith("/admin/")) {
+    importPath = joinUrlParts(legacyApiBasePath, importPath);
+  }
+
   let origin = String(env.TOKENMANAGER_SUB2API_DEFAULT_ORIGIN || env.TOKENMANAGER_SUB2API_DEFAULT_HOST || "").trim();
 
   const legacyDefaultUrl = String(env.TOKENMANAGER_SUB2API_DEFAULT_URL || "").trim();
   if (legacyDefaultUrl) {
-    const parsed = splitBrowserDefaultUrl(legacyDefaultUrl, importPath);
+    const parsed = splitBrowserDefaultUrl(legacyDefaultUrl);
     origin = parsed.origin || origin;
-    apiBasePath = parsed.apiBasePath || apiBasePath;
+    if (parsed.importPath) {
+      importPath = parsed.importPath.includes("/admin/")
+        ? parsed.importPath
+        : joinUrlParts(parsed.importPath, "/admin/accounts/data");
+    }
   }
+
+  const adminBasePath = getAdminBasePathFromImportPath(importPath);
 
   return {
     origin,
-    apiBasePath,
+    adminBasePath,
+    apiBasePath: adminBasePath,
     importPath,
-    defaultUrl: origin ? joinUrlParts(origin, apiBasePath) : apiBasePath,
+    defaultUrl: origin || "",
   };
 }
 
@@ -883,9 +897,13 @@ async function handleAuth(req, res, parsedUrl, context) {
     const defaults = config.sub2apiBrowserDefaults || createSub2ApiBrowserDefaults({});
     jsonResponse(res, 200, {
       sub2api_default_origin: defaults.origin || "",
-      sub2api_api_base_path: defaults.apiBasePath || "/api/v1",
-      sub2api_import_path: defaults.importPath || "/admin/accounts/data",
-      sub2api_default_url: defaults.defaultUrl || defaults.apiBasePath || "/api/v1",
+      sub2api_admin_base_path: defaults.adminBasePath || "/api/v1",
+      sub2api_import_path: defaults.importPath || "/api/v1/admin/accounts/data",
+      // Backward-compatible aliases for older static pages.
+      sub2api_api_base_path: defaults.adminBasePath || "/api/v1",
+      sub2api_default_url: defaults.origin
+        ? joinUrlParts(defaults.origin, defaults.adminBasePath || "/api/v1")
+        : (defaults.adminBasePath || "/api/v1"),
     }, {
       "Cache-Control": "no-store",
     });

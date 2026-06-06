@@ -19,7 +19,7 @@
 - 登录表单只有密码，不需要用户名，也不会触发浏览器 Basic Auth 弹窗。
 - TokenManager 自身登录配置只应放在服务器运行环境：`.env`/systemd `EnvironmentFile` 保存 `TOKENMANAGER_PASSWORD_HASH` 和 `TOKENMANAGER_SESSION_SECRET`，不要保存或提交明文登录密码。
 - 进入工具页面后，`sub2api 服务器地址`、`Bearer Token`、分组、代理等仍可手动/自定义输入；Bearer Token 输入框默认隐藏，可用眼睛按钮临时显示/隐藏。
-- `sub2api 服务器地址` 输入框只需要填浏览器能访问的域名或 `ip:端口`，例如 `https://api.wenlab.link`；`/api/v1` 和 `/admin/accounts/data` 由服务器 `.env` 自动补齐。
+- `sub2api 服务器地址` 输入框只需要填浏览器能访问的域名或 `ip:端口`，例如 `https://api.wenlab.link`；`/api/v1/admin/accounts/data` 由服务器 `.env` 自动补齐。
 - 不要把服务器内网 `http://127.0.0.1:8080` 当网页默认地址；浏览器里的 `127.0.0.1` 指的是访问者自己的电脑。
 - 转换预览仍在浏览器本地完成，不写入 localStorage/sessionStorage。
 - 点击导入/刷新时，浏览器会把你在页面里填写的 sub2api 地址和 Bearer Token 用于请求 sub2api。
@@ -78,4 +78,4 @@ ChatGPT Web session 通常不包含 OAuth 文件里常见的 `refresh_token`，�
 docs/index.html
 ```
 
-本地静态打开时可以做浏览器内转换预览。若要导入到 sub2api，请在页面里填写你的 sub2api 服务器地址和 Bearer Token。地址建议写 `https://api.example.com` 或 `https://ip:端口`；API base path 和导入接口路径由部署时的 `.env` 配置补齐。如果页面通过 HTTPS 打开，浏览器可能会拦截 HTTP 明文地址。
+本地静态打开时可以做浏览器内转换预览。若要导入到 sub2api，请在页面里填写你的 sub2api 服务器地址和 Bearer Token。地址建议写 `https://api.example.com` 或 `https://ip:端口`；完整导入接口路径由部署时的 `.env` 配置补齐。如果页面通过 HTTPS 打开，浏览器可能会拦截 HTTP 明文地址。

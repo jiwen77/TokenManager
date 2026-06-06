@@ -381,6 +381,18 @@
         margin-bottom: 12px;
       }
 
+      .format-toggle {
+        gap: 8px;
+        user-select: none;
+      }
+
+      .format-toggle input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+
       .textarea-shell {
         position: relative;
       }

@@ -19,6 +19,7 @@
           concurrency: 10,
           rateMultiplier: 1.0,
           expiresAtOverride: null,
+          formatInputPretty: false,
           serverAccounts: [],
           serverAccountTotal: 0,
           availableGroups: [],
@@ -448,19 +449,110 @@
           return found;
         }
 
+        function getLineColumn(text, index) {
+          const before = text.slice(0, Math.max(0, index));
+          const lines = before.split(/\n/);
+          return {
+            line: lines.length,
+            column: lines[lines.length - 1].length + 1,
+          };
+        }
+
+        function parseConcatenatedJsonValues(text, originalError) {
+          const values = [];
+          const input = String(text || "");
+          let index = 0;
+
+          while (index < input.length) {
+            while (index < input.length && (/[\s,;]/.test(input[index]))) {
+              index += 1;
+            }
+            if (index >= input.length) {
+              break;
+            }
+
+            const start = index;
+            const first = input[index];
+            if (first !== "{" && first !== "[") {
+              const location = getLineColumn(input, index);
+              throw new Error(`JSON 解析失败：第 ${location.line} 行第 ${location.column} 列应以 { 或 [ 开始；也可以用 JSON 数组包住多个账号。`);
+            }
+
+            const stack = [];
+            let inString = false;
+            let escaped = false;
+            let completed = false;
+
+            for (; index < input.length; index += 1) {
+              const char = input[index];
+              if (inString) {
+                if (escaped) {
+                  escaped = false;
+                } else if (char === "\\") {
+                  escaped = true;
+                } else if (char === "\"") {
+                  inString = false;
+                }
+                continue;
+              }
+
+              if (char === "\"") {
+                inString = true;
+                continue;
+              }
+              if (char === "{" || char === "[") {
+                stack.push(char);
+                continue;
+              }
+              if (char === "}" || char === "]") {
+                const expected = char === "}" ? "{" : "[";
+                if (stack.pop() !== expected) {
+                  const location = getLineColumn(input, index);
+                  throw new Error(`JSON 解析失败：第 ${location.line} 行第 ${location.column} 列括号不匹配。`);
+                }
+                if (!stack.length) {
+                  const rawDocument = input.slice(start, index + 1);
+                  try {
+                    values.push(JSON.parse(rawDocument));
+                  } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    throw new Error(`JSON 解析失败：第 ${values.length + 1} 段 JSON 无效：${message}`);
+                  }
+                  index += 1;
+                  completed = true;
+                  break;
+                }
+              }
+            }
+
+            if (!completed) {
+              const message = originalError instanceof Error ? originalError.message : "JSON 片段未闭合";
+              throw new Error(`JSON 解析失败：${message}`);
+            }
+          }
+
+          return values;
+        }
+
+        function parseInputJsonValues(text) {
+          const input = String(text || "");
+          try {
+            return [JSON.parse(input)];
+          } catch (error) {
+            return parseConcatenatedJsonValues(input, error);
+          }
+        }
+
         function parseInputDocuments(text) {
           if (typeof text !== "string" || text.trim() === "") {
             return [];
           }
 
-          let parsed;
-          try {
-            parsed = JSON.parse(text);
-          } catch (error) {
-            throw new Error(`JSON 解析失败：${error.message}`);
-          }
-
-          return collectSessionLikeObjects(parsed);
+          const values = parseInputJsonValues(text);
+          return values.flatMap((value, index) => collectSessionLikeObjects(
+            value,
+            values.length > 1 ? `pasted-json#${index + 1}` : "pasted-json",
+          ));
         }
 
         function convertSession(record, options = {}) {
@@ -987,20 +1079,36 @@
           }
         }
 
-        function formatInputJson() {
+        function getFormattedInputText(text) {
+          return parseInputJsonValues(text)
+            .map((value) => JSON.stringify(value, null, 2))
+            .join("\n\n");
+        }
+
+        function formatInputJson(options = {}) {
           const text = elements.input.value;
           if (!text.trim()) {
-            setStatus(elements.inputStatus, "没有可格式化的 JSON。", "error");
-            return;
+            if (!options.silent) {
+              setStatus(elements.inputStatus, "没有可格式化的 JSON。", "error");
+            }
+            return false;
           }
 
           try {
-            const parsed = JSON.parse(text);
-            elements.input.value = JSON.stringify(parsed, null, 2);
+            const formatted = getFormattedInputText(text);
+            if (formatted && formatted !== text) {
+              elements.input.value = formatted;
+            }
             scheduleConvert();
-            setStatus(elements.inputStatus, "已格式化换行。", "ok");
+            if (!options.silent) {
+              setStatus(elements.inputStatus, "已开启格式化换行；多段 JSON 会按账号分段显示。", "ok");
+            }
+            return true;
           } catch (error) {
-            setStatus(elements.inputStatus, error instanceof Error ? `格式化失败：${error.message}` : "格式化失败：不是有效 JSON。", "error");
+            if (!options.silent) {
+              setStatus(elements.inputStatus, error instanceof Error ? `格式化失败：${error.message}` : "格式化失败：不是有效 JSON。", "error");
+            }
+            return false;
           }
         }
 
@@ -2275,7 +2383,15 @@
           elements.sub2apiTokenToggle.title = label;
         });
 
-        elements.input.addEventListener("input", scheduleConvert);
+        elements.input.addEventListener("input", () => {
+          if (state.formatInputPretty) {
+            if (!formatInputJson({ silent: true })) {
+              scheduleConvert();
+            }
+            return;
+          }
+          scheduleConvert();
+        });
         elements.copyOutput.addEventListener("click", copyOutput);
         elements.downloadOutput.addEventListener("click", downloadOutput);
         elements.importSub2api.addEventListener("click", importToSub2Api);
@@ -2295,7 +2411,15 @@
           scheduleConvert();
         });
 
-        elements.formatInput.addEventListener("click", formatInputJson);
+        elements.formatInput.addEventListener("change", () => {
+          state.formatInputPretty = elements.formatInput.checked === true;
+          if (state.formatInputPretty) {
+            formatInputJson();
+          } else {
+            scheduleConvert();
+            setStatus(elements.inputStatus, "已关闭格式化换行；解析仍支持多账号多段 JSON。", state.converted.length ? "ok" : "");
+          }
+        });
 
         updateOutput();
         renderServerAccounts();

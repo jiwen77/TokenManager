@@ -95,13 +95,16 @@
             <div class="input-actions">
               <button class="button button-secondary" id="pick-files" type="button">选择文件</button>
               <button class="button button-secondary" id="load-example" type="button">填入示例结构</button>
-              <button class="button button-secondary" id="format-input" type="button">格式化换行</button>
+              <label class="button button-secondary format-toggle" for="format-input" title="开启后会把输入区 JSON 自动整理成多行显示">
+                <input id="format-input" type="checkbox" />
+                <span>格式化换行</span>
+              </label>
               <button class="button button-ghost" id="clear-input" type="button">清空</button>
             </div>
             <textarea
               id="session-input"
               spellcheck="false"
-              placeholder='{"user":{"email":"mark@example.com"},"expires":"2026-08-06T14:29:36.155Z","account":{"id":"...","planType":"plus"},"accessToken":"...","sessionToken":"..."}'
+              placeholder='支持单个 JSON、JSON 数组，或多段 JSON（每行/每段一个账号）。例如：{"user":{"email":"mark@example.com"},"accessToken":"..."}'
             ></textarea>
             <div class="status-line" id="input-status">等待输入。</div>
           </div>

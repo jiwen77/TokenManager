@@ -14,6 +14,7 @@ function createFakeElement(selector, options = {}) {
     dataset: options.dataset || {},
     disabled: false,
     files: [],
+    checked: Boolean(options.checked),
     innerHTML: "",
     listeners: {},
     selectedOptions: [],
@@ -702,14 +703,42 @@ function testCustomProxyPickerSelectsVisibleProxiesAndClears() {
   assert.match(elements.get("#sub2api-proxy-summary").innerHTML, /未选择代理/);
 }
 
-function testFormatInputJsonAddsLineBreaks() {
+function testMultilineJsonDocumentsConvertMultipleAccounts() {
   const { elements } = loadPageScript();
-  elements.get("#session-input").value = '{"user":{"email":"mark@example.com"},"accessToken":"token"}';
+  const first = {
+    user: { email: "first@example.com" },
+    accessToken: "access-token-first",
+  };
+  const second = {
+    user: { email: "second@example.com" },
+    accessToken: "access-token-second",
+  };
 
-  dispatch(elements.get("#format-input"), "click");
+  elements.get("#session-input").value = `${JSON.stringify(first)}\n${JSON.stringify(second)}`;
+  dispatch(elements.get("#session-input"), "input");
+
+  const output = JSON.parse(elements.get("#output").value);
+  assert.equal(output.accounts.length, 2);
+  assert.equal(output.accounts[0].credentials.email, "first@example.com");
+  assert.equal(output.accounts[1].credentials.email, "second@example.com");
+  assert.equal(elements.get("#stat-count").textContent, "2");
+  assert.match(elements.get("#input-status").textContent, /解析完成：2 个账号/);
+}
+
+function testFormatInputToggleAddsLineBreaks() {
+  const { elements } = loadPageScript();
+  elements.get("#session-input").value = [
+    '{"user":{"email":"mark@example.com"},"accessToken":"token"}',
+    '{"user":{"email":"second@example.com"},"accessToken":"token2"}',
+  ].join("\n");
+
+  elements.get("#format-input").checked = true;
+  dispatch(elements.get("#format-input"), "change");
 
   assert.match(elements.get("#session-input").value, /{\n  "user":/);
-  assert.match(elements.get("#input-status").textContent, /已格式化换行/);
+  assert.match(elements.get("#session-input").value, /}\n\n{/);
+  assert.match(elements.get("#input-status").textContent, /已开启格式化换行/);
+  assert.equal(JSON.parse(`[${elements.get("#session-input").value.split(/\n\n/).join(",")}]`).length, 2);
 }
 
 async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
@@ -1254,7 +1283,8 @@ async function main() {
   testCustomGroupPickerCheckboxUpdatesHiddenSelect();
   await testLegacyNamedBindingsHydrateCheckedItems();
   testCustomProxyPickerSelectsVisibleProxiesAndClears();
-  testFormatInputJsonAddsLineBreaks();
+  testMultilineJsonDocumentsConvertMultipleAccounts();
+  testFormatInputToggleAddsLineBreaks();
   await testServerDefaultSub2apiUrlHydratesInput();
   await testSub2apiUrlShorthandNormalizesToApiEndpoints();
   await testServerProxyModeImportsWithoutBrowserBearer();

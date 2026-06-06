@@ -13,6 +13,9 @@ const DEFAULT_SESSION_TTL_SECONDS = 12 * 60 * 60;
 const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const SCRYPT_PREFIX = "scrypt:v1";
+const DEFAULT_APP_BASE_PATH = "/token-manager";
+const LEGACY_AUTH_PREFIX = "/token-manager-auth";
+const LEGACY_API_PREFIX = "/token-manager-api";
 
 const ALLOWED_PROXY_ROUTES = [
   { method: "GET", pattern: /^\/admin\/accounts$/ },
@@ -422,6 +425,8 @@ function createConfig(env = process.env) {
     cookieSecure,
     cookieSameSite: env.TOKENMANAGER_COOKIE_SAMESITE || "Lax",
     cookiePath: env.TOKENMANAGER_COOKIE_PATH || "/",
+    appBasePath: normalizePublicPath(env.TOKENMANAGER_BASE_PATH || DEFAULT_APP_BASE_PATH, DEFAULT_APP_BASE_PATH).replace(/\/+$/, "") || DEFAULT_APP_BASE_PATH,
+    staticDir: path.resolve(env.TOKENMANAGER_STATIC_DIR || path.join(__dirname, "..", "docs")),
     runtimeConfigFile: env.TOKENMANAGER_CONFIG_FILE || path.join(__dirname, "runtime-config.json"),
     maxBodyBytes: parsePositiveInteger(env.TOKENMANAGER_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES),
     upstreamTimeoutMs: parsePositiveInteger(env.TOKENMANAGER_UPSTREAM_TIMEOUT_MS, 30000),
@@ -631,6 +636,124 @@ function htmlResponse(res, status, html, headers = {}) {
   res.end(body);
 }
 
+function redirectResponse(res, location, status = 308) {
+  res.writeHead(status, {
+    Location: location,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Length": 0,
+  });
+  res.end();
+}
+
+const STATIC_CONTENT_TYPES = new Map([
+  [".html", "text/html; charset=utf-8"],
+  [".css", "text/css; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".svg", "image/svg+xml"],
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webp", "image/webp"],
+  [".ico", "image/x-icon"],
+  [".txt", "text/plain; charset=utf-8"],
+]);
+
+function tokenManagerSecurityHeaders(headers = {}) {
+  return {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    ...headers,
+  };
+}
+
+function normalizeAppBasePath(config) {
+  return String(config.appBasePath || DEFAULT_APP_BASE_PATH).replace(/\/+$/, "") || DEFAULT_APP_BASE_PATH;
+}
+
+function getNestedAuthPrefix(config) {
+  return `${normalizeAppBasePath(config)}/auth`;
+}
+
+function getNestedApiPrefix(config) {
+  return `${normalizeAppBasePath(config)}/api`;
+}
+
+function pathStartsWithPrefix(pathname, prefix) {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function getNormalizedAuthPath(pathname, config) {
+  if (pathStartsWithPrefix(pathname, LEGACY_AUTH_PREFIX)) {
+    return `${LEGACY_AUTH_PREFIX}${pathname.slice(LEGACY_AUTH_PREFIX.length) || "/"}`;
+  }
+  const nestedPrefix = getNestedAuthPrefix(config);
+  if (pathStartsWithPrefix(pathname, nestedPrefix)) {
+    return `${LEGACY_AUTH_PREFIX}${pathname.slice(nestedPrefix.length) || "/"}`;
+  }
+  return "";
+}
+
+function getApiPrefix(pathname, config) {
+  if (pathStartsWithPrefix(pathname, LEGACY_API_PREFIX)) {
+    return LEGACY_API_PREFIX;
+  }
+  const nestedPrefix = getNestedApiPrefix(config);
+  if (pathStartsWithPrefix(pathname, nestedPrefix)) {
+    return nestedPrefix;
+  }
+  return "";
+}
+
+function getSafeStaticFilePath(staticDir, requestPath) {
+  let decoded = "/";
+  try {
+    decoded = decodeURIComponent(requestPath || "/");
+  } catch {
+    decoded = "/";
+  }
+  const normalized = path.posix.normalize(`/${decoded}`).replace(/^\/+/, "");
+  const requested = normalized && normalized !== "." ? normalized : "index.html";
+  const resolved = path.resolve(staticDir, requested);
+  const root = path.resolve(staticDir);
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    return "";
+  }
+  return resolved;
+}
+
+function serveStaticFile(req, res, filePath) {
+  if (!["GET", "HEAD"].includes(req.method || "GET")) {
+    return methodNotAllowed(res);
+  }
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    notFound(res);
+    return;
+  }
+  if (!stat.isFile()) {
+    notFound(res);
+    return;
+  }
+
+  const contentType = STATIC_CONTENT_TYPES.get(path.extname(filePath).toLowerCase()) || "application/octet-stream";
+  const isHtml = contentType.startsWith("text/html");
+  res.writeHead(200, tokenManagerSecurityHeaders({
+    "Content-Type": contentType,
+    "Content-Length": stat.size,
+    "Cache-Control": isHtml ? "no-store" : "public, max-age=300",
+  }));
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  fs.createReadStream(filePath).pipe(res);
+}
+
 function tokenManagerLoginPage() {
   return `<!doctype html>
 <html lang="zh-CN">
@@ -676,7 +799,7 @@ function tokenManagerLoginPage() {
       status.textContent = '';
       submit.disabled = true;
       try {
-        const response = await fetch('/token-manager-auth/login', {
+        const response = await fetch('/token-manager/auth/login', {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -953,8 +1076,9 @@ function isAllowedProxyRoute(method, pathname) {
   return ALLOWED_PROXY_ROUTES.some((route) => route.method === method && route.pattern.test(pathname));
 }
 
-function getProxyPath(requestPathname) {
-  const stripped = requestPathname.slice("/token-manager-api".length) || "/";
+function getProxyPath(requestPathname, config) {
+  const prefix = getApiPrefix(requestPathname, config) || LEGACY_API_PREFIX;
+  const stripped = requestPathname.slice(prefix.length) || "/";
   return stripped.startsWith("/") ? stripped : `/${stripped}`;
 }
 
@@ -977,7 +1101,7 @@ async function proxyOnce(req, parsedUrl, bodyBuffer, config, tokenManager, runti
   const effective = getEffectiveSub2ApiProxyConfig(config, runtimeConfig);
   const usesStaticCredential = Boolean(effective.sub2apiAdminApiKey || effective.sub2apiAdminBearerToken);
   const accessToken = usesStaticCredential ? effective.sub2apiAdminBearerToken : await tokenManager.getAccessToken({ force: forceTokenRefresh });
-  const targetUrl = joinUrl(effective.sub2apiBaseUrl, getProxyPath(parsedUrl.pathname), parsedUrl.search);
+  const targetUrl = joinUrl(effective.sub2apiBaseUrl, getProxyPath(parsedUrl.pathname, config), parsedUrl.search);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.upstreamTimeoutMs);
   try {
@@ -1013,7 +1137,7 @@ async function handleProxy(req, res, parsedUrl, context) {
 
   assertStateChangingRequestIsSameOrigin(req);
 
-  const proxyPath = getProxyPath(parsedUrl.pathname);
+  const proxyPath = getProxyPath(parsedUrl.pathname, config);
   if (!isAllowedProxyRoute(req.method, proxyPath)) {
     jsonResponse(res, 403, { error: "proxy_route_not_allowed" });
     return;
@@ -1036,9 +1160,46 @@ async function handleProxy(req, res, parsedUrl, context) {
   res.end(responseBuffer);
 }
 
+async function handleApp(req, res, parsedUrl, context) {
+  const { config, sessions } = context;
+  const appBasePath = normalizeAppBasePath(config);
+  const pathname = parsedUrl.pathname;
+
+  if (pathname === appBasePath) {
+    redirectResponse(res, `${appBasePath}/`);
+    return;
+  }
+
+  if (!["GET", "HEAD"].includes(req.method || "GET")) {
+    methodNotAllowed(res);
+    return;
+  }
+
+  const session = sessions.fromRequest(req);
+  if (!session) {
+    htmlResponse(res, 401, tokenManagerLoginPage(), tokenManagerSecurityHeaders());
+    return;
+  }
+
+  const relativePath = pathname.slice(`${appBasePath}/`.length) || "index.html";
+  const staticPath = getSafeStaticFilePath(config.staticDir, relativePath);
+  if (!staticPath) {
+    notFound(res);
+    return;
+  }
+
+  if (!fs.existsSync(staticPath)) {
+    const fallbackPath = getSafeStaticFilePath(config.staticDir, "index.html");
+    serveStaticFile(req, res, fallbackPath);
+    return;
+  }
+
+  serveStaticFile(req, res, staticPath);
+}
+
 async function handleAuth(req, res, parsedUrl, context) {
   const { config, sessions, runtimeConfigStore } = context;
-  const pathname = parsedUrl.pathname;
+  const pathname = getNormalizedAuthPath(parsedUrl.pathname, config);
 
   if (pathname === "/token-manager-auth/health") {
     if (req.method !== "GET") return methodNotAllowed(res);
@@ -1158,16 +1319,20 @@ function createTokenManagerServer(options = {}) {
   return http.createServer(async (req, res) => {
     try {
       const parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
-      if (parsedUrl.pathname.startsWith("/token-manager-auth/")) {
+      if (getNormalizedAuthPath(parsedUrl.pathname, config)) {
         await handleAuth(req, res, parsedUrl, context);
         return;
       }
-      if (parsedUrl.pathname.startsWith("/token-manager-api/")) {
+      if (getApiPrefix(parsedUrl.pathname, config)) {
         if (config.authOnly) {
           notFound(res);
         } else {
           await handleProxy(req, res, parsedUrl, context);
         }
+        return;
+      }
+      if (pathStartsWithPrefix(parsedUrl.pathname, normalizeAppBasePath(config))) {
+        await handleApp(req, res, parsedUrl, context);
         return;
       }
       notFound(res);

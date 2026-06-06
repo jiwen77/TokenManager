@@ -24,10 +24,10 @@ BFF 在 Hostdzire-LA 服务器上访问 http://127.0.0.1:8080/api/v1 的 sub2api
 - sub2api 管理认证保存在服务器 `.env` 或 `server/runtime-config.json`；保存后的 Bearer Token 不会在页面刷新后回显明文。
 - BFF 可以使用服务器本机地址 `http://127.0.0.1:8080/api/v1` 访问 sub2api；这是服务器进程访问，不是浏览器访问。
 - 转换预览仍在浏览器本地完成，不写入 localStorage/sessionStorage。
-- 点击“保存配置”会把 sub2api 地址、Bearer Token 和绑定设置保存到服务器；点击导入/刷新时，浏览器只请求同源 `/token-manager-api/*`，真正的 sub2api 请求由服务器 BFF 完成。
+- 点击“保存配置”会把 sub2api 地址、Bearer Token 和绑定设置保存到服务器；点击导入/刷新时，浏览器只请求同源 `/token-manager/api/*`，真正的 sub2api 请求由服务器 BFF 完成。
 - 不再支持从 `/token-manager/?token=...` 自动读取 Bearer Token，避免敏感 token 进入浏览器历史、日志或分享链接。
 
-当前页面密码门禁和 sub2api 服务端代理都由 `server/tokenmanager-bff.js` 配合 Caddy 提供，说明见 [`server/README.md`](server/README.md)。
+当前 TokenManager 已是单端口 BFF 应用：`server/tokenmanager-bff.js` 同时服务页面、登录/配置接口和 sub2api 服务端代理；Caddy 只需要把 `/token-manager` 入口反代到 BFF，说明见 [`server/README.md`](server/README.md)。
 
 ## 使用提示
 
@@ -80,4 +80,4 @@ ChatGPT Web session 通常不包含 OAuth 文件里常见的 `refresh_token`，�
 docs/index.html
 ```
 
-本地静态打开时可以做浏览器内转换预览。若不运行 BFF，导入到 sub2api 仍需要浏览器直连远端 sub2api 并填写 Bearer Token；生产部署推荐运行 BFF 服务端代理模式，让浏览器只请求同源 `/token-manager-api/*`。
+本地静态打开时可以做浏览器内转换预览。若不运行 BFF，导入到 sub2api 仍需要浏览器直连远端 sub2api 并填写 Bearer Token；生产部署推荐运行 BFF 服务端代理模式，让浏览器只请求同源 `/token-manager/api/*`。

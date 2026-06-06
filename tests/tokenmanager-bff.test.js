@@ -53,6 +53,7 @@ async function startBff(configOverrides = {}, sub2apiBaseUrl) {
     maxBodyBytes: 1024 * 1024,
     upstreamTimeoutMs: 5000,
     sub2apiBrowserDefaults: { origin: "", adminBasePath: "/api/v1", apiBasePath: "/api/v1", importPath: "/api/v1/admin/accounts/data", defaultUrl: "" },
+    staticDir: path.join(__dirname, "..", "docs"),
     ...configOverrides,
   };
   const server = createTokenManagerServer({ config, logger: { info() {}, warn() {}, error() {} } });
@@ -166,6 +167,68 @@ test("page gate shows an in-page password form and needs no username", async () 
     });
     assert.equal(allowed.response.status, 204);
     assert.equal(allowed.body, "");
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("BFF serves the TokenManager app and nested routes under one app prefix", async () => {
+  const upstreamRequests = [];
+  const mock = await startMockSub2Api((req, res) => {
+    upstreamRequests.push(req.url);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ data: { items: [], total: 0 } }));
+  });
+  const bff = await startBff({
+    sub2apiAdminApiKey: "test-api-key",
+    sub2apiAdminEmail: "",
+    sub2apiAdminPassword: "",
+  }, mock.baseUrl);
+
+  try {
+    const redirect = await fetchText(`${bff.baseUrl}/token-manager`, { redirect: "manual" });
+    assert.equal(redirect.response.status, 308);
+    assert.equal(redirect.response.headers.get("location"), "/token-manager/");
+
+    const unauthenticatedPage = await fetchText(`${bff.baseUrl}/token-manager/`);
+    assert.equal(unauthenticatedPage.response.status, 401);
+    assert.match(unauthenticatedPage.body, /TokenManager 访问密码/);
+    assert.match(unauthenticatedPage.body, /\/token-manager\/auth\/login/);
+
+    const login = await fetchJson(`${bff.baseUrl}/token-manager/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const app = await fetchText(`${bff.baseUrl}/token-manager/`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(app.response.status, 200);
+    assert.match(app.body, /id="save-sub2api-config"/);
+    assert.match(app.body, /\/token-manager\/auth\/config/);
+    assert.match(app.body, /\/token-manager\/api/);
+
+    const icon = await fetchText(`${bff.baseUrl}/token-manager/favicon.svg`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(icon.response.status, 200);
+    assert.match(icon.response.headers.get("content-type") || "", /image\/svg\+xml/);
+
+    const config = await fetchJson(`${bff.baseUrl}/token-manager/auth/config`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(config.response.status, 200);
+    assert.equal(config.body.sub2api_proxy_enabled, true);
+
+    const proxied = await fetchJson(`${bff.baseUrl}/token-manager/api/admin/accounts?page=1`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(proxied.response.status, 200);
+    assert.equal(upstreamRequests.some((url) => url === "/api/v1/admin/accounts?page=1"), true);
   } finally {
     await bff.close();
     await mock.close();

@@ -516,7 +516,7 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
       },
     },
     fetch: async (url) => {
-      assert.equal(url, "/token-manager-auth/config");
+      assert.equal(url, "/token-manager/auth/config");
       return {
         ok: true,
         status: 200,
@@ -560,7 +560,7 @@ async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
       },
     },
     fetch: async (url, options = {}) => {
-      if (url === "/token-manager-auth/config") {
+      if (url === "/token-manager/auth/config") {
         return {
           ok: true,
           status: 200,
@@ -615,7 +615,7 @@ async function testServerProxyModeImportsWithoutBrowserBearer() {
       },
     },
     fetch: async (url, options = {}) => {
-      if (url === "/token-manager-auth/config") {
+      if (url === "/token-manager/auth/config") {
         return {
           ok: true,
           status: 200,
@@ -658,10 +658,10 @@ async function testServerProxyModeImportsWithoutBrowserBearer() {
   await new Promise((resolve) => setImmediate(resolve));
 
   const post = capturedRequests.find((request) => request.options?.method === "POST");
-  assert.equal(post.url, "/token-manager-api/admin/accounts/data");
+  assert.equal(post.url, "/token-manager/api/admin/accounts/data");
   assert.equal(post.options.headers.Authorization, undefined);
   assert.ok(
-    capturedRequests.some((request) => request.url.startsWith("/token-manager-api/admin/accounts?")),
+    capturedRequests.some((request) => request.url.startsWith("/token-manager/api/admin/accounts?")),
     "server proxy mode should refresh server accounts through BFF",
   );
 }
@@ -677,7 +677,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
       },
     },
     fetch: async (url, options = {}) => {
-      if (url === "/token-manager-auth/config" && options.method === "POST") {
+      if (url === "/token-manager/auth/config" && options.method === "POST") {
         capturedPosts.push(JSON.parse(options.body));
         return {
           ok: true,
@@ -694,7 +694,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
           }),
         };
       }
-      if (url === "/token-manager-auth/config") {
+      if (url === "/token-manager/auth/config") {
         return {
           ok: true,
           status: 200,

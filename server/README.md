@@ -6,7 +6,7 @@
 
 ## 推荐：页面门禁 + 服务端代理模式
 
-Hostdzire-LA 当前应使用服务端代理模式：浏览器只访问 TokenManager，同源请求 `/token-manager-api/*`；BFF 在服务器上访问本机 sub2api。页面里的“保存配置”会写入服务器运行时配置文件，默认是 `server/runtime-config.json`。
+Hostdzire-LA 当前应使用服务端代理模式：浏览器只访问 TokenManager，同源请求 `/token-manager/api/*`；BFF 在服务器上访问本机 sub2api。页面里的“保存配置”会写入服务器运行时配置文件，默认是 `server/runtime-config.json`。
 
 ```bash
 TOKENMANAGER_AUTH_ONLY=false
@@ -14,6 +14,8 @@ TOKENMANAGER_SESSION_SECRET=<至少32字节随机字符串>
 TOKENMANAGER_PASSWORD_HASH=<node server/tokenmanager-bff.js hash-password 生成>
 TOKENMANAGER_HOST=127.0.0.1
 TOKENMANAGER_PORT=8787
+TOKENMANAGER_BASE_PATH=/token-manager
+TOKENMANAGER_STATIC_DIR=/opt/tokenmanager/docs
 TOKENMANAGER_CONFIG_FILE=/opt/tokenmanager/server/runtime-config.json
 
 # BFF 在 Hostdzire-LA 上访问 sub2api，本机地址只给服务器进程用。
@@ -27,7 +29,7 @@ TOKENMANAGER_SUB2API_DEFAULT_ORIGIN=https://api.wenlab.link
 TOKENMANAGER_SUB2API_IMPORT_PATH=/api/v1/admin/accounts/data
 ```
 
-Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-manager-auth/check }`。未登录时 BFF 会返回一个 HTML 密码表单；登录成功后写入 HttpOnly Cookie，再放行静态页面。Caddy 还要把 `/token-manager-api/*` 反代到 BFF，不能返回 404。
+BFF 自己服务 `/token-manager/` 页面、`/token-manager/auth/*` 登录/配置接口和 `/token-manager/api/*` sub2api 代理接口。Caddy 不再需要 `forward_auth` 或 `file_server`，只需要把 TokenManager 入口反代到 BFF。
 
 登录信息与页面默认值建议这样保存：
 
@@ -51,7 +53,7 @@ Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-ma
 - Priority
 - Rate Multiplier
 
-保存后的 Bearer Token 不会通过 `/token-manager-auth/config` 明文返回给页面；页面只会知道服务器端已有认证。
+保存后的 Bearer Token 不会通过 `/token-manager/auth/config` 明文返回给页面；页面只会知道服务器端已有认证。
 
 ## 可选：浏览器直连模式默认地址字段
 
@@ -80,7 +82,7 @@ https://api.wenlab.link/api/v1/admin/accounts/data
 
 ## 服务端代理 sub2api 管理接口字段
 
-服务端代理模式会让浏览器永远看不到 sub2api 管理 token，需要配置下面的 sub2api 变量并开放 `/token-manager-api/*` 到 BFF。
+服务端代理模式会让浏览器永远看不到 sub2api 管理 token，需要配置下面的 sub2api 变量；浏览器只访问 BFF 的 `/token-manager/api/*`。
 
 ```bash
 TOKENMANAGER_SESSION_SECRET=<至少32字节随机字符串>
@@ -99,6 +101,8 @@ SUB2API_ADMIN_PASSWORD=<sub2api 管理员密码>
 # SUB2API_ADMIN_BEARER_TOKEN=<仅保存在服务器的管理员 Bearer>
 TOKENMANAGER_HOST=127.0.0.1
 TOKENMANAGER_PORT=8787
+TOKENMANAGER_BASE_PATH=/token-manager
+TOKENMANAGER_STATIC_DIR=/opt/tokenmanager/docs
 ```
 
 生成登录密码哈希（避免把明文密码写入 shell 历史）：
@@ -111,17 +115,21 @@ printf '%s' '你的登录密码' | node server/tokenmanager-bff.js hash-password
 
 ## Caddy 路由
 
-静态页面继续服务 `/token-manager/*`，并将以下同源路径反代到 BFF：
+TokenManager 现在是单端口 BFF 应用。Caddy 只需要一个 TokenManager 入口反代块：
 
 ```caddyfile
-handle /token-manager-auth/* {
-  reverse_proxy 127.0.0.1:8787
-}
-handle /token-manager-api/* {
+@tokenmanager path /token-manager /token-manager/*
+handle @tokenmanager {
   reverse_proxy 127.0.0.1:8787
 }
 ```
 
-注意不要用 `handle_path`，否则 Caddy 会剥离 `/token-manager-auth` 和 `/token-manager-api` 前缀；BFF 默认按完整路径路由。
+BFF 会在这个入口下自行分发：
+
+- `/token-manager/`：页面与页面内登录表单
+- `/token-manager/auth/*`：登录、登出、配置保存、健康检查
+- `/token-manager/api/*`：sub2api 服务端代理
+
+不要用 `handle_path`，否则 Caddy 会剥离 `/token-manager` 前缀，BFF 无法按完整产品路径路由。旧版 `/token-manager-auth/*` 和 `/token-manager-api/*` 仍在 BFF 内兼容，但新部署不需要再在 Caddy 暴露它们。
 
 BFF 只允许代理必要的 sub2api 管理接口：账号列表、账号导入、分组列表和代理列表。

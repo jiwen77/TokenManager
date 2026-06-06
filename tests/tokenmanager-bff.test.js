@@ -421,6 +421,16 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
         group_options: [{ id: 1, name: "Default Group" }],
         proxy_ids: [7, "pool-b"],
         proxy_options: [{ id: 7, name: "Default Proxy" }, { id: "pool-b", name: "Pool B" }],
+        server_account_cache: [{
+          id: 42,
+          name: "Saved Account",
+          credentials: {
+            email: "saved@example.com",
+            refresh_token: "must-not-be-persisted",
+          },
+          status: "active",
+        }],
+        server_account_total: 1,
         priority: 3,
         rate_multiplier: 1.5,
         websocket_mode: "passthrough",
@@ -435,6 +445,15 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.deepEqual(saved.body.proxy_ids, [7, "pool-b"]);
     assert.equal(saved.body.proxy_id, 7);
     assert.deepEqual(saved.body.proxy_options, [{ id: 7, name: "Default Proxy" }, { id: "pool-b", name: "Pool B" }]);
+    assert.deepEqual(saved.body.server_account_cache, [{
+      id: "42",
+      name: "Saved Account",
+      email: "saved@example.com",
+      expires_at: "",
+      status: "active",
+    }]);
+    assert.equal(saved.body.server_account_total, 1);
+    assert.doesNotMatch(JSON.stringify(saved.body), /must-not-be-persisted/);
     assert.equal(saved.body.priority, 3);
     assert.equal(saved.body.rate_multiplier, 1.5);
     assert.equal(saved.body.websocket_mode, "passthrough");
@@ -454,6 +473,15 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.deepEqual(persisted.proxyIds, [7, "pool-b"]);
     assert.equal(persisted.proxyId, 7);
     assert.deepEqual(persisted.proxyOptions, [{ id: 7, name: "Default Proxy" }, { id: "pool-b", name: "Pool B" }]);
+    assert.deepEqual(persisted.serverAccountCache, [{
+      id: "42",
+      name: "Saved Account",
+      email: "saved@example.com",
+      expires_at: "",
+      status: "active",
+    }]);
+    assert.equal(persisted.serverAccountTotal, 1);
+    assert.doesNotMatch(JSON.stringify(persisted), /must-not-be-persisted/);
     assert.equal(persisted.websocketMode, "passthrough");
     assert.equal(persisted.autoPassthrough, true);
     const rawDatabase = fs.readFileSync(databaseFile);

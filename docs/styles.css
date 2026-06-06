@@ -966,13 +966,29 @@
         line-height: 1.45;
       }
 
+      .sub2api-panel-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) max-content;
+        align-items: start;
+      }
+
+      .sub2api-panel-head > div:first-child {
+        min-width: 0;
+      }
+
       .sub2api-actions {
         display: flex;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         align-items: center;
         gap: 10px;
         justify-content: flex-end;
+        justify-self: end;
         flex: 0 0 auto;
+        margin-left: auto;
+      }
+
+      .sub2api-actions .button {
+        white-space: nowrap;
       }
 
       .sub2api-config-status {
@@ -1129,6 +1145,10 @@
         .group-picker-actions,
         .sub2api-actions {
           display: grid;
+          grid-template-columns: 1fr;
+        }
+
+        .sub2api-panel-head {
           grid-template-columns: 1fr;
         }
 

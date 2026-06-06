@@ -537,6 +537,14 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
           group_options: [{ id: 1, name: "Cached Group" }, { id: "custom", name: "Custom Group" }],
           proxy_ids: [7, "pool-b"],
           proxy_options: [{ id: 7, name: "Cached Proxy" }, { id: "pool-b", name: "Pool B" }],
+          server_account_cache: [{
+            id: "saved-1",
+            name: "Cached Account",
+            email: "cached@example.com",
+            expires_at: "2026-08-06T14:29:36.155Z",
+            status: "active",
+          }],
+          server_account_total: 1,
           priority: 3,
           rate_multiplier: 1.5,
           websocket_mode: "passthrough",
@@ -561,6 +569,8 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
   assert.equal(elements.get("#sub2api-url").value, "https://api.example.com");
   assert.match(elements.get("#sub2api-group-list").innerHTML, /Cached Group/);
   assert.match(elements.get("#sub2api-proxy-list").innerHTML, /Cached Proxy/);
+  assert.match(elements.get("#server-account-body").innerHTML, /cached@example\.com/);
+  assert.match(elements.get("#server-account-status").textContent, /已加载上次缓存/);
   assert.deepEqual(
     elements.get("#sub2api-groups").options.map((option) => option.selected),
     [true, true, false],
@@ -998,8 +1008,31 @@ async function testImportToSub2ApiRandomlyAssignsSelectedProxies() {
 
 async function testRefreshServerAccountsFetchesPersistedAccounts() {
   const capturedRequests = [];
+  const capturedConfigPosts = [];
   const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://tokenmanager.example.com",
+        protocol: "https:",
+        search: "",
+      },
+    },
     fetch: async (url, options) => {
+      if (url === "/token-manager/auth/config" && options?.method === "POST") {
+        capturedConfigPosts.push(JSON.parse(options.body));
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ ok: true }),
+        };
+      }
+      if (url === "/token-manager/auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sub2api_api_base_path: "/api/v1" }),
+        };
+      }
       capturedRequests.push({ url, options });
       return {
         ok: true,
@@ -1034,7 +1067,15 @@ async function testRefreshServerAccountsFetchesPersistedAccounts() {
   );
   assert.equal(capturedRequests[0].options.headers.Authorization, "Bearer test-token");
   assert.match(elements.get("#server-account-body").innerHTML, /saved@example\.com/);
-  assert.match(elements.get("#server-account-status").textContent, /服务器已保存 1 个账号/);
+  assert.match(elements.get("#server-account-status").textContent, /列表已缓存/);
+  assert.deepEqual(capturedConfigPosts[0].server_account_cache, [{
+    id: "7",
+    name: "Saved Account",
+    email: "saved@example.com",
+    expires_at: "2026-08-06T14:29:36.155Z",
+    status: "active",
+  }]);
+  assert.equal(capturedConfigPosts[0].server_account_total, 1);
 }
 
 async function testUrlTokenDoesNotHydrateBearerOrFetchAccounts() {

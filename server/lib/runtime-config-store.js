@@ -7,6 +7,7 @@ const { spawnSync } = require("node:child_process");
 
 const DEFAULT_IMPORT_PATH = "/api/v1/admin/accounts/data";
 const ENCRYPTED_SECRET_PREFIX = "enc:v1";
+const MAX_SERVER_ACCOUNT_CACHE_ITEMS = 100;
 
 function normalizePublicPath(value, fallback = "/api/v1") {
   const raw = String(value || fallback).trim();
@@ -66,6 +67,58 @@ function normalizeSub2ApiMetaOptions(value) {
       seen.add(key);
       return true;
     });
+}
+
+function firstDisplayValue(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    const text = String(value).trim();
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function normalizeServerAccountCache(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .slice(0, MAX_SERVER_ACCOUNT_CACHE_ITEMS)
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const credentials = item.credentials && typeof item.credentials === "object" ? item.credentials : {};
+      const extra = item.extra && typeof item.extra === "object" ? item.extra : {};
+      const id = firstDisplayValue(item.id, item.account_id, item.accountId, item.uuid);
+      const email = firstDisplayValue(item.email, credentials.email, extra.email);
+      const name = firstDisplayValue(item.name, item.display_name, item.displayName, email, credentials.chatgpt_account_id, id);
+      const expiresAt = firstDisplayValue(item.expires_at, item.expiresAt, credentials.expires_at, credentials.expiresAt);
+      const status = firstDisplayValue(
+        item.status,
+        item.state,
+        item.disabled === true ? "disabled" : item.disabled === false ? "active" : "",
+      );
+
+      if (!id && !name && !email && !expiresAt && !status) {
+        return null;
+      }
+
+      return {
+        id,
+        name,
+        email,
+        expires_at: expiresAt,
+        status,
+      };
+    })
+    .filter(Boolean);
 }
 
 function normalizeFiniteNumber(value, fallback) {
@@ -165,6 +218,14 @@ function sanitizeRuntimeConfig(value = {}, current = {}) {
   if (Object.prototype.hasOwnProperty.call(value, "proxy_options") || Object.prototype.hasOwnProperty.call(value, "proxyOptions")) {
     next.proxyOptions = normalizeSub2ApiMetaOptions(value.proxy_options ?? value.proxyOptions);
     next.metaCachedAt = new Date().toISOString();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "server_account_cache") || Object.prototype.hasOwnProperty.call(value, "serverAccountCache")) {
+    next.serverAccountCache = normalizeServerAccountCache(value.server_account_cache ?? value.serverAccountCache);
+    next.serverAccountTotal = normalizeFiniteNumber(value.server_account_total ?? value.serverAccountTotal, next.serverAccountCache.length);
+    next.serverAccountsCachedAt = new Date().toISOString();
+  } else if (Object.prototype.hasOwnProperty.call(value, "server_account_total") || Object.prototype.hasOwnProperty.call(value, "serverAccountTotal")) {
+    next.serverAccountTotal = normalizeFiniteNumber(value.server_account_total ?? value.serverAccountTotal, current.serverAccountTotal ?? 0);
   }
 
   if (Object.prototype.hasOwnProperty.call(value, "proxy_ids") || Object.prototype.hasOwnProperty.call(value, "proxyIds")) {
@@ -476,6 +537,7 @@ module.exports = {
   normalizeSub2ApiGroupIds,
   normalizeSub2ApiMetaOptions,
   normalizeSub2ApiSelectionIds,
+  normalizeServerAccountCache,
   normalizeSub2ApiOrigin,
   normalizeSub2ApiSelectionId,
   sanitizeRuntimeConfig,

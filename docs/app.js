@@ -1464,6 +1464,7 @@
           if (Array.isArray(payload.proxy_options) || Array.isArray(payload.proxyOptions)) {
             setNativeProxyOptions(payload.proxy_options || payload.proxyOptions, "未缓存代理数据");
           }
+          hydrateServerAccountCache(payload);
           if (Array.isArray(payload.group_ids)) {
             state.selectedGroups = payload.group_ids
               .map((value) => /^\d+$/.test(String(value)) ? parseInt(value, 10) : String(value))
@@ -1800,6 +1801,69 @@
           }).join("");
         }
 
+        function getServerAccountCacheFromPayload(payload) {
+          if (!isPlainObject(payload)) {
+            return [];
+          }
+          return Array.isArray(payload.server_account_cache)
+            ? payload.server_account_cache
+            : Array.isArray(payload.serverAccountCache)
+              ? payload.serverAccountCache
+              : [];
+        }
+
+        function hydrateServerAccountCache(payload) {
+          const cachedAccounts = getServerAccountCacheFromPayload(payload);
+          if (!cachedAccounts.length) {
+            return;
+          }
+          const total = Number(payload.server_account_total ?? payload.serverAccountTotal ?? cachedAccounts.length);
+          state.serverAccounts = cachedAccounts;
+          state.serverAccountTotal = Number.isFinite(total) ? total : cachedAccounts.length;
+          renderServerAccounts();
+          setStatus(
+            elements.serverAccountStatus,
+            `已加载上次缓存：服务器账号共 ${state.serverAccountTotal} 个，当前显示 ${state.serverAccounts.length} 个；点击“刷新服务器账号”可获取最新数据。`,
+            "ok",
+          );
+        }
+
+        function toRuntimeServerAccountCache(accounts) {
+          return accounts.map((account) => {
+            const display = getServerAccountDisplay(account);
+            return {
+              id: String(account?.id ?? account?.account_id ?? account?.accountId ?? account?.uuid ?? "").trim(),
+              name: display.name || "",
+              email: display.email || "",
+              expires_at: display.expiresAt || "",
+              status: display.status || "",
+            };
+          }).filter((account) => account.id || account.name || account.email || account.expires_at || account.status);
+        }
+
+        async function saveServerAccountCache() {
+          if (!canLoadServerDefaults()) {
+            return false;
+          }
+          const response = await fetch("/token-manager/auth/config", {
+            method: "POST",
+            cache: "no-store",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              server_account_cache: toRuntimeServerAccountCache(state.serverAccounts),
+              server_account_total: state.serverAccountTotal,
+            }),
+          });
+          const payload = await readJsonResponse(response);
+          if (!response.ok) {
+            throw new Error(getErrorMessageFromResponseBody(payload, `HTTP ${response.status}`));
+          }
+          return true;
+        }
+
         async function refreshServerAccounts() {
           elements.refreshServerAccounts.disabled = true;
           const originalText = elements.refreshServerAccounts.textContent;
@@ -1818,9 +1882,20 @@
             state.serverAccounts = items;
             state.serverAccountTotal = total;
             renderServerAccounts();
-            setStatus(elements.serverAccountStatus, `服务器已保存 ${total} 个账号，当前显示 ${items.length} 个。`, "ok");
+            let cacheSaved = false;
+            try {
+              cacheSaved = await saveServerAccountCache();
+            } catch {
+              cacheSaved = false;
+            }
+            setStatus(
+              elements.serverAccountStatus,
+              `服务器已保存 ${total} 个账号，当前显示 ${items.length} 个。${cacheSaved ? "列表已缓存，下次打开会先显示缓存。" : "缓存保存失败时仍可手动刷新。"}`,
+              "ok",
+            );
           } catch (error) {
-            setStatus(elements.serverAccountStatus, error instanceof Error ? error.message : "读取服务器账号失败。", "error");
+            const message = error instanceof Error ? error.message : "读取服务器账号失败。";
+            setStatus(elements.serverAccountStatus, state.serverAccounts.length ? `刷新失败：${message}；仍显示上次缓存。` : message, "error");
           } finally {
             elements.refreshServerAccounts.disabled = false;
             elements.refreshServerAccounts.textContent = originalText;

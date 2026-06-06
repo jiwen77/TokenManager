@@ -9,6 +9,7 @@ const { URL } = require("node:url");
 const {
   RuntimeConfigStore,
   normalizeFiniteNumber,
+  normalizeServerAccountCache,
   normalizeSub2ApiGroupIds,
   normalizeSub2ApiMetaOptions,
   normalizeSub2ApiSelectionIds,
@@ -285,6 +286,9 @@ function buildPublicConfig(config, runtimeConfig = {}) {
     proxy_id: proxyIds.length ? proxyIds[0] : null,
     proxy_options: normalizeSub2ApiMetaOptions(runtimeConfig.proxyOptions),
     meta_cached_at: runtimeConfig.metaCachedAt,
+    server_account_cache: normalizeServerAccountCache(runtimeConfig.serverAccountCache),
+    server_account_total: normalizeFiniteNumber(runtimeConfig.serverAccountTotal, Array.isArray(runtimeConfig.serverAccountCache) ? runtimeConfig.serverAccountCache.length : 0),
+    server_accounts_cached_at: runtimeConfig.serverAccountsCachedAt,
     priority: normalizeFiniteNumber(runtimeConfig.priority, 1),
     rate_multiplier: normalizeFiniteNumber(runtimeConfig.rateMultiplier, 1),
     websocket_mode: runtimeConfig.websocketMode || "off",

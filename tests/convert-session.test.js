@@ -450,6 +450,25 @@ function testCodexManagerAuthJsonPreservesRealRefreshAndMetadata() {
   assert.equal(authJson.meta.chatgpt_account_id, "chatgpt-account-1");
 }
 
+
+function testSub2apiImportToolsOnlyVisibleForSub2apiFormat() {
+  const { elements, formatButtons } = loadPageScript();
+  const cpaButton = formatButtons.find((button) => button.dataset.format === "cpa");
+  const sub2apiButton = formatButtons.find((button) => button.dataset.format === "sub2api");
+
+  assert.equal(elements.get("#sub2api-tools").hidden, false);
+  assert.equal(elements.get("#import-sub2api").hidden, false);
+
+  dispatch(cpaButton, "click");
+  assert.equal(elements.get("#sub2api-tools").hidden, true);
+  assert.equal(elements.get("#import-sub2api").hidden, true);
+  assert.equal(elements.get("#import-sub2api").disabled, true);
+
+  dispatch(sub2apiButton, "click");
+  assert.equal(elements.get("#sub2api-tools").hidden, false);
+  assert.equal(elements.get("#import-sub2api").hidden, false);
+}
+
 async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
   const capturedRequests = [];
   const { elements } = loadPageScript({
@@ -642,6 +661,7 @@ async function main() {
   testCodexAuthJsonPreservesRealRefreshTokenAndIdToken();
   testCodexManagerAuthJsonUsesEmptyRefreshTokenWhenMissing();
   testCodexManagerAuthJsonPreservesRealRefreshAndMetadata();
+  testSub2apiImportToolsOnlyVisibleForSub2apiFormat();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
   await testRefreshServerAccountsFetchesPersistedAccounts();
   await testUrlTokenDoesNotHydrateBearerOrFetchAccounts();

@@ -635,6 +635,19 @@
         margin: 10px 12px 12px;
       }
 
+      .sub2api-tools {
+        margin-top: 16px;
+      }
+
+      .sub2api-tools[hidden] {
+        display: none !important;
+      }
+
+      .sub2api-tools .panel-body {
+        display: grid;
+        gap: 12px;
+      }
+
       .hidden {
         display: none !important;
       }
@@ -827,6 +840,58 @@
             <p class="notice" id="cpa-notice">
               ChatGPT Web session 一般没有 `refresh_token`；缺少真实 `id_token` 时 CPA、Cockpit、Codex 和 AxonHub 会构造 Codex 可解析的占位 JWT claims。Codex 和 Codex-Manager 会保留空 `refresh_token`；AxonHub 缺少真实 `refresh_token` 时会写入占位值。
             </p>
+            <div class="summary" aria-label="转换统计">
+              <div class="stat">
+                <div class="stat-value" id="stat-count">0</div>
+                <div class="stat-label">账号数</div>
+              </div>
+              <div class="stat">
+                <div class="stat-value" id="stat-format">sub2api</div>
+                <div class="stat-label">输出格式</div>
+              </div>
+              <div class="stat">
+                <div class="stat-value" id="stat-errors">0</div>
+                <div class="stat-label">跳过项</div>
+              </div>
+            </div>
+            <div class="accounts" aria-label="账号预览">
+              <table>
+                <colgroup>
+                  <col class="col-name" />
+                  <col class="col-email" />
+                  <col class="col-expiry" />
+                  <col class="col-type" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>邮箱</th>
+                    <th>过期时间</th>
+                    <th>来源</th>
+                  </tr>
+                </thead>
+                <tbody id="account-body">
+                  <tr>
+                    <td colspan="4" class="empty">暂无可转换账号。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="issues" id="issues"></div>
+            <textarea id="output" readonly spellcheck="false" placeholder="转换后会显示 JSON。"></textarea>
+            <div class="status-line" id="output-status">暂无输出。</div>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel sub2api-tools" id="sub2api-tools" aria-labelledby="sub2api-tools-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="sub2api-tools-title">sub2api 导入与服务器数据</h2>
+            <p>仅在选择 sub2api 输出格式时可用；这里用于填写 sub2api 地址、Bearer Token、分组与代理，并查看服务器持久化账号。</p>
+          </div>
+        </div>
+        <div class="panel-body">
             <div class="import-config" aria-label="sub2api 导入配置">
               <div class="import-config-grid">
                 <div class="config-field">
@@ -903,48 +968,8 @@
                 </table>
               </div>
             </section>
-            <div class="summary" aria-label="转换统计">
-              <div class="stat">
-                <div class="stat-value" id="stat-count">0</div>
-                <div class="stat-label">账号数</div>
-              </div>
-              <div class="stat">
-                <div class="stat-value" id="stat-format">sub2api</div>
-                <div class="stat-label">输出格式</div>
-              </div>
-              <div class="stat">
-                <div class="stat-value" id="stat-errors">0</div>
-                <div class="stat-label">跳过项</div>
-              </div>
-            </div>
-            <div class="accounts" aria-label="账号预览">
-              <table>
-                <colgroup>
-                  <col class="col-name" />
-                  <col class="col-email" />
-                  <col class="col-expiry" />
-                  <col class="col-type" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>名称</th>
-                    <th>邮箱</th>
-                    <th>过期时间</th>
-                    <th>来源</th>
-                  </tr>
-                </thead>
-                <tbody id="account-body">
-                  <tr>
-                    <td colspan="4" class="empty">暂无可转换账号。</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="issues" id="issues"></div>
-            <textarea id="output" readonly spellcheck="false" placeholder="转换后会显示 JSON。"></textarea>
-            <div class="status-line" id="output-status">暂无输出。</div>
-          </div>
-        </section>
+
+        </div>
       </section>
     </main>
 
@@ -995,6 +1020,7 @@
           serverAccountBody: document.querySelector("#server-account-body"),
           serverAccountStatus: document.querySelector("#server-account-status"),
           sub2apiToken: document.querySelector("#sub2api-token"),
+          sub2apiTools: document.querySelector("#sub2api-tools"),
           sub2apiUrl: document.querySelector("#sub2api-url"),
           statCount: document.querySelector("#stat-count"),
           statErrors: document.querySelector("#stat-errors"),
@@ -1742,6 +1768,21 @@
           element.classList.toggle("is-error", tone === "error");
         }
 
+        function isSub2ApiFormat() {
+          return state.format === "sub2api";
+        }
+
+        function updateSub2ApiToolsVisibility() {
+          const isVisible = isSub2ApiFormat();
+          elements.sub2apiTools.hidden = !isVisible;
+          elements.importSub2api.hidden = !isVisible;
+        }
+
+        function updateImportButtonState() {
+          updateSub2ApiToolsVisibility();
+          elements.importSub2api.disabled = !state.converted.length || !isSub2ApiFormat();
+        }
+
         function updateOutput() {
           const hasConverted = state.converted.length > 0;
           let outputText = "";
@@ -1759,7 +1800,7 @@
           elements.statFormat.textContent = OUTPUT_LABELS[state.format];
           elements.outputSubtitle.textContent = `当前输出为 ${OUTPUT_LABELS[state.format]} 导入 JSON。`;
           elements.cpaNotice.style.display = ["cpa", "cockpit", "codex", "axonhub", "codexmanager"].includes(state.format) ? "block" : "none";
-          elements.importSub2api.disabled = !hasConverted;
+          updateImportButtonState();
 
           renderAccounts();
           renderIssues();
@@ -2105,6 +2146,10 @@
             setStatus(elements.outputStatus, "没有可导入的账号。", "error");
             return;
           }
+          if (!isSub2ApiFormat()) {
+            setStatus(elements.outputStatus, "只有选择 sub2api 输出格式时才能导入到 sub2api。", "error");
+            return;
+          }
 
           const sub2apiUrl = getSub2ApiEndpoint();
           const bearerToken = getSub2ApiBearerToken();
@@ -2138,7 +2183,7 @@
           } catch (error) {
             setStatus(elements.outputStatus, error instanceof Error ? error.message : "导入到 sub2api 失败。", "error");
           } finally {
-            elements.importSub2api.disabled = !state.converted.length;
+            updateImportButtonState();
           }
         }
 

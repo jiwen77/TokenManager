@@ -546,6 +546,8 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
           }],
           server_account_total: 1,
           priority: 3,
+          concurrency: 4,
+          expires_at: 1780473960,
           rate_multiplier: 1.5,
           websocket_mode: "passthrough",
           auto_passthrough: true,
@@ -581,6 +583,12 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
     [true, true, false],
   );
   assert.equal(elements.get("#sub2api-priority").value, "3");
+  assert.equal(elements.get("#sub2api-concurrency").value, "4");
+  assert.equal(elements.get("#sub2api-expires-at").value, (() => {
+    const date = new Date(1780473960 * 1000);
+    const pad = (number) => String(number).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  })());
   assert.equal(elements.get("#sub2api-rate-multiplier").value, "1.5");
   assert.equal(elements.get("#sub2api-websocket-mode").value, "passthrough");
   assert.equal(elements.get("#sub2api-auto-passthrough").checked, true);
@@ -729,7 +737,7 @@ async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
         status: 200,
         text: async () => JSON.stringify(String(url).includes("/admin/accounts?")
           ? { data: { items: [], total: 0 } }
-          : { data: { account_created: 1, account_failed: 0, proxy_created: 0, proxy_reused: 0 } }),
+          : { data: { success: 1, failed: 0, results: [] } }),
       };
     },
   });
@@ -752,7 +760,7 @@ async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
   await new Promise((resolve) => setImmediate(resolve));
 
   const post = capturedRequests.find((request) => request.options?.method === "POST");
-  assert.equal(post.url, "https://sub2api.example.com:9443/api/v1/admin/accounts/data");
+  assert.equal(post.url, "https://sub2api.example.com:9443/api/v1/admin/accounts/batch");
   assert.ok(
     capturedRequests.some((request) => request.url.startsWith("https://sub2api.example.com:9443/api/v1/admin/accounts?")),
     "shorthand host should also normalize server account refresh URL",
@@ -788,7 +796,7 @@ async function testServerProxyModeImportsWithoutBrowserBearer() {
         status: 200,
         text: async () => JSON.stringify(String(url).includes("/admin/accounts?")
           ? { data: { items: [], total: 0 } }
-          : { data: { account_created: 1, account_failed: 0, proxy_created: 0, proxy_reused: 0 } }),
+          : { data: { success: 1, failed: 0, results: [] } }),
       };
     },
   });
@@ -813,7 +821,7 @@ async function testServerProxyModeImportsWithoutBrowserBearer() {
   await new Promise((resolve) => setImmediate(resolve));
 
   const post = capturedRequests.find((request) => request.options?.method === "POST");
-  assert.equal(post.url, "/token-manager/api/admin/accounts/data");
+  assert.equal(post.url, "/token-manager/api/admin/accounts/batch");
   assert.equal(post.options.headers.Authorization, undefined);
   assert.ok(
     capturedRequests.some((request) => request.url.startsWith("/token-manager/api/admin/accounts?")),
@@ -847,6 +855,8 @@ async function testSaveSub2apiConfigPostsServerSettings() {
             proxy_ids: [7, "pool-b"],
             proxy_id: 7,
             priority: 3,
+            concurrency: 4,
+            expires_at: Math.floor(new Date("2026-07-01T08:00:00").getTime() / 1000),
             rate_multiplier: 1.5,
             websocket_mode: "ctx_pool",
             auto_passthrough: true,
@@ -878,6 +888,10 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   dispatch(elements.get("#sub2api-proxy"), "change");
   elements.get("#sub2api-priority").value = "3";
   dispatch(elements.get("#sub2api-priority"), "input");
+  elements.get("#sub2api-concurrency").value = "4";
+  dispatch(elements.get("#sub2api-concurrency"), "input");
+  elements.get("#sub2api-expires-at").value = "2026-07-01T08:00:00";
+  dispatch(elements.get("#sub2api-expires-at"), "input");
   elements.get("#sub2api-rate-multiplier").value = "1.5";
   dispatch(elements.get("#sub2api-rate-multiplier"), "input");
   elements.get("#sub2api-websocket-mode").value = "ctx_pool";
@@ -895,6 +909,8 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   assert.deepEqual(capturedPosts[0].proxy_ids, [7, "pool-b"]);
   assert.equal(capturedPosts[0].proxy_id, 7);
   assert.equal(capturedPosts[0].priority, 3);
+  assert.equal(capturedPosts[0].concurrency, 4);
+  assert.equal(capturedPosts[0].expires_at, Math.floor(new Date("2026-07-01T08:00:00").getTime() / 1000));
   assert.equal(capturedPosts[0].rate_multiplier, 1.5);
   assert.equal(capturedPosts[0].websocket_mode, "ctx_pool");
   assert.equal(capturedPosts[0].auto_passthrough, true);
@@ -951,6 +967,12 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
 
   sub2apiUrl.value = "https://sub2api.example.com/api/v1/admin/accounts/data";
   sub2apiToken.value = "test-token";
+  elements.get("#sub2api-groups").selectedOptions = [{ value: "11" }, { value: "13" }];
+  dispatch(elements.get("#sub2api-groups"), "change");
+  elements.get("#sub2api-concurrency").value = "4";
+  dispatch(elements.get("#sub2api-concurrency"), "input");
+  elements.get("#sub2api-expires-at").value = "2026-06-30T12:34:56";
+  dispatch(elements.get("#sub2api-expires-at"), "input");
   elements.get("#sub2api-websocket-mode").value = "passthrough";
   dispatch(elements.get("#sub2api-websocket-mode"), "change");
   elements.get("#sub2api-auto-passthrough").checked = true;
@@ -969,20 +991,22 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
 
   const capturedRequest = capturedRequests.find((request) => request.options?.method === "POST");
   assert.ok(capturedRequest, "expected import fetch to be called");
-  assert.equal(capturedRequest.url, "https://sub2api.example.com/api/v1/admin/accounts/data");
+  assert.equal(capturedRequest.url, "https://sub2api.example.com/api/v1/admin/accounts/batch");
   assert.equal(capturedRequest.options.method, "POST");
   assert.equal(capturedRequest.options.headers.Authorization, "Bearer test-token");
 
   const body = JSON.parse(capturedRequest.options.body);
-  assert.equal(body.skip_default_group_bind, true);
-  assert.equal(body.data.proxies.length, 0);
-  assert.equal(body.data.accounts.length, 1);
-  assert.equal(body.data.accounts[0].platform, "openai");
-  assert.equal(body.data.accounts[0].type, "oauth");
-  assert.equal(body.data.accounts[0].credentials.access_token, accessToken);
-  assert.equal(body.data.accounts[0].extra.openai_oauth_responses_websockets_v2_enabled, true);
-  assert.equal(body.data.accounts[0].extra.openai_oauth_responses_websockets_v2_mode, "passthrough");
-  assert.equal(body.data.accounts[0].extra.openai_passthrough, true);
+  assert.equal(body.skip_default_group_bind, undefined);
+  assert.equal(body.accounts.length, 1);
+  assert.equal(body.accounts[0].platform, "openai");
+  assert.equal(body.accounts[0].type, "oauth");
+  assert.deepEqual(body.accounts[0].group_ids, [11, 13]);
+  assert.equal(body.accounts[0].concurrency, 4);
+  assert.equal(body.accounts[0].expires_at, Math.floor(new Date("2026-06-30T12:34:56").getTime() / 1000));
+  assert.equal(body.accounts[0].credentials.access_token, accessToken);
+  assert.equal(body.accounts[0].extra.openai_oauth_responses_websockets_v2_enabled, true);
+  assert.equal(body.accounts[0].extra.openai_oauth_responses_websockets_v2_mode, "passthrough");
+  assert.equal(body.accounts[0].extra.openai_passthrough, true);
   assert.match(outputStatus.textContent, /已导入 sub2api/);
   assert.ok(
     capturedRequests.some((request) => String(request.url).startsWith("https://sub2api.example.com/api/v1/admin/accounts?")),
@@ -1047,7 +1071,7 @@ async function testImportToSub2ApiRandomlyAssignsSelectedProxies() {
   assert.ok(capturedRequest, "expected import fetch to be called");
   const body = JSON.parse(capturedRequest.options.body);
   assert.deepEqual(
-    body.data.accounts.map((account) => account.proxy_id),
+    body.accounts.map((account) => account.proxy_id),
     [101, 202],
   );
 }

@@ -437,6 +437,8 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
         }],
         server_account_total: 1,
         priority: 3,
+        concurrency: 4,
+        expires_at: 1780473960,
         rate_multiplier: 1.5,
         websocket_mode: "passthrough",
         auto_passthrough: true,
@@ -461,6 +463,8 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(saved.body.server_account_total, 1);
     assert.doesNotMatch(JSON.stringify(saved.body), /must-not-be-persisted/);
     assert.equal(saved.body.priority, 3);
+    assert.equal(saved.body.concurrency, 4);
+    assert.equal(saved.body.expires_at, 1780473960);
     assert.equal(saved.body.rate_multiplier, 1.5);
     assert.equal(saved.body.websocket_mode, "passthrough");
     assert.equal(saved.body.auto_passthrough, true);
@@ -489,6 +493,9 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     }]);
     assert.equal(persisted.serverAccountTotal, 1);
     assert.doesNotMatch(JSON.stringify(persisted), /must-not-be-persisted/);
+    assert.equal(persisted.priority, 3);
+    assert.equal(persisted.concurrency, 4);
+    assert.equal(persisted.expiresAt, 1780473960);
     assert.equal(persisted.websocketMode, "passthrough");
     assert.equal(persisted.autoPassthrough, true);
     const rawDatabase = fs.readFileSync(databaseFile);
@@ -519,6 +526,8 @@ test("sqlite runtime config migrates legacy JSON and encrypts bearer token", () 
     groupIds: [1, "custom"],
     proxyIds: [7, "pool-b"],
     priority: 3,
+    concurrency: 4,
+    expiresAt: 1780473960,
     rateMultiplier: 1.5,
     websocketMode: "ctx_pool",
     autoPassthrough: true,
@@ -539,6 +548,8 @@ test("sqlite runtime config migrates legacy JSON and encrypts bearer token", () 
   assert.deepEqual(migrated.proxyIds, [7, "pool-b"]);
   assert.equal(migrated.proxyId, 7);
   assert.equal(migrated.priority, 3);
+  assert.equal(migrated.concurrency, 4);
+  assert.equal(migrated.expiresAt, 1780473960);
   assert.equal(migrated.rateMultiplier, 1.5);
   assert.equal(migrated.websocketMode, "ctx_pool");
   assert.equal(migrated.autoPassthrough, true);
@@ -635,6 +646,68 @@ test("authenticated proxy injects sub2api bearer server-side only", async () => 
 });
 
 
+
+
+test("authenticated proxy forwards batch account creation fields", async () => {
+  const upstreamRequests = [];
+  const mock = await startMockSub2Api(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    upstreamRequests.push({
+      url: req.url,
+      method: req.method,
+      authorization: req.headers.authorization,
+      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : null,
+    });
+    if (req.url === "/api/v1/admin/accounts/batch" && req.method === "POST") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: { success: 1, failed: 0 } }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  const bff = await startBff({ sub2apiAdminBearerToken: "static-admin-token", sub2apiAdminPassword: "" }, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const proxied = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts/batch`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accounts: [{
+          name: "tokenmanager-test",
+          platform: "openai",
+          type: "oauth",
+          group_ids: [11, 13],
+          proxy_id: 6,
+          concurrency: 4,
+          expires_at: 1780473960,
+          credentials: { access_token: "redacted" },
+        }],
+      }),
+    });
+
+    assert.equal(proxied.response.status, 200);
+    assert.equal(upstreamRequests.length, 1);
+    assert.equal(upstreamRequests[0].authorization, "Bearer static-admin-token");
+    assert.deepEqual(upstreamRequests[0].body.accounts[0].group_ids, [11, 13]);
+    assert.equal(upstreamRequests[0].body.accounts[0].proxy_id, 6);
+    assert.equal(upstreamRequests[0].body.accounts[0].concurrency, 4);
+    assert.equal(upstreamRequests[0].body.accounts[0].expires_at, 1780473960);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
 
 test("admin api key mode injects x-api-key instead of bearer", async () => {
   const upstreamRequests = [];

@@ -126,6 +126,22 @@ function normalizeFiniteNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function normalizeNonNegativeInteger(value, fallback) {
+  const number = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+function normalizeUnixSeconds(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return null;
+  }
+  return Math.floor(number > 1e11 ? number / 1000 : number);
+}
+
 function normalizeSub2ApiWebsocketMode(value, fallback = "off") {
   const normalized = String(value || fallback || "off").trim().toLowerCase();
   return ["off", "ctx_pool", "passthrough"].includes(normalized) ? normalized : fallback;
@@ -238,6 +254,19 @@ function sanitizeRuntimeConfig(value = {}, current = {}) {
 
   if (Object.prototype.hasOwnProperty.call(value, "priority")) {
     next.priority = normalizeFiniteNumber(value.priority, current.priority ?? 1);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "concurrency")) {
+    next.concurrency = normalizeNonNegativeInteger(value.concurrency, current.concurrency ?? 10);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "expires_at") || Object.prototype.hasOwnProperty.call(value, "expiresAt")) {
+    const expiresAt = normalizeUnixSeconds(value.expires_at ?? value.expiresAt);
+    if (expiresAt === null) {
+      delete next.expiresAt;
+    } else {
+      next.expiresAt = expiresAt;
+    }
   }
 
   if (Object.prototype.hasOwnProperty.call(value, "rate_multiplier") || Object.prototype.hasOwnProperty.call(value, "rateMultiplier")) {
@@ -533,6 +562,8 @@ module.exports = {
   decryptSecret,
   encryptSecret,
   normalizeFiniteNumber,
+  normalizeNonNegativeInteger,
+  normalizeUnixSeconds,
   normalizeSub2ApiWebsocketMode,
   normalizeSub2ApiGroupIds,
   normalizeSub2ApiMetaOptions,

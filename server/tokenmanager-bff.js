@@ -9,10 +9,12 @@ const { URL } = require("node:url");
 const {
   RuntimeConfigStore,
   normalizeFiniteNumber,
+  normalizeNonNegativeInteger,
   normalizeServerAccountCache,
   normalizeSub2ApiGroupIds,
   normalizeSub2ApiMetaOptions,
   normalizeSub2ApiSelectionIds,
+  normalizeUnixSeconds,
 } = require("./lib/runtime-config-store");
 
 const DEFAULT_SUB2API_BASE_URL = "http://127.0.0.1:8080/api/v1";
@@ -27,6 +29,7 @@ const LEGACY_API_PREFIX = "/token-manager-api";
 
 const ALLOWED_PROXY_ROUTES = [
   { method: "GET", pattern: /^\/admin\/accounts$/ },
+  { method: "POST", pattern: /^\/admin\/accounts\/batch$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/data$/ },
   { method: "GET", pattern: /^\/admin\/groups\/all$/ },
   { method: "GET", pattern: /^\/admin\/proxies\/all$/ },
@@ -304,6 +307,8 @@ function buildPublicConfig(config, runtimeConfig = {}) {
     server_account_total: normalizeFiniteNumber(runtimeConfig.serverAccountTotal, Array.isArray(runtimeConfig.serverAccountCache) ? runtimeConfig.serverAccountCache.length : 0),
     server_accounts_cached_at: runtimeConfig.serverAccountsCachedAt,
     priority: normalizeFiniteNumber(runtimeConfig.priority, 1),
+    concurrency: normalizeNonNegativeInteger(runtimeConfig.concurrency, 10),
+    expires_at: normalizeUnixSeconds(runtimeConfig.expiresAt),
     rate_multiplier: normalizeFiniteNumber(runtimeConfig.rateMultiplier, 1),
     websocket_mode: runtimeConfig.websocketMode || "off",
     auto_passthrough: runtimeConfig.autoPassthrough === true,

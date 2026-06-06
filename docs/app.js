@@ -16,7 +16,9 @@
           skipped: [],
           outputText: "",
           priority: 1,
+          concurrency: 10,
           rateMultiplier: 1.0,
+          expiresAtOverride: null,
           serverAccounts: [],
           serverAccountTotal: 0,
           availableGroups: [],
@@ -78,7 +80,9 @@
           selectAllProxies: document.querySelector("#select-all-sub2api-proxies"),
           clearProxies: document.querySelector("#clear-sub2api-proxies"),
           priority: document.querySelector("#sub2api-priority"),
+          concurrency: document.querySelector("#sub2api-concurrency"),
           rateMultiplier: document.querySelector("#sub2api-rate-multiplier"),
+          expiresAt: document.querySelector("#sub2api-expires-at"),
           websocketMode: document.querySelector("#sub2api-websocket-mode"),
           autoPassthrough: document.querySelector("#sub2api-auto-passthrough"),
           tokenmanagerPassword: document.querySelector("#tokenmanager-new-password"),
@@ -197,6 +201,36 @@
 
           const date = new Date(value);
           return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+        }
+
+        function unixSecondsFromDateInput(value) {
+          const text = String(value || "").trim();
+          if (!text) {
+            return null;
+          }
+          const date = new Date(text);
+          return Number.isNaN(date.getTime()) ? null : Math.floor(date.getTime() / 1000);
+        }
+
+        function dateInputFromUnixSeconds(value) {
+          const seconds = Number(value);
+          if (!Number.isFinite(seconds) || seconds <= 0) {
+            return "";
+          }
+          const date = new Date(seconds * 1000);
+          if (Number.isNaN(date.getTime())) {
+            return "";
+          }
+          const pad = (number) => String(number).padStart(2, "0");
+          return [
+            date.getFullYear(),
+            pad(date.getMonth() + 1),
+            pad(date.getDate()),
+          ].join("-") + `T${[
+            pad(date.getHours()),
+            pad(date.getMinutes()),
+            pad(date.getSeconds()),
+          ].join(":")}`;
         }
 
         function timestampFromUnixSeconds(value) {
@@ -610,9 +644,9 @@
             name: firstNonEmpty(name, email, sourceName, "ChatGPT Account"),
             platform: "openai",
             type: "oauth",
-            expires_at: accessTokenExpiresAt,
+            expires_at: state.expiresAtOverride ?? accessTokenExpiresAt,
             auto_pause_on_expired: true,
-            concurrency: 10,
+            concurrency: state.concurrency,
             priority: state.priority,
             rate_multiplier: state.rateMultiplier,
             group_ids: state.selectedGroups.length ? state.selectedGroups : undefined,
@@ -753,6 +787,12 @@
           return {
             data: buildSub2apiDocument(state.converted, new Date()),
             skip_default_group_bind: true,
+          };
+        }
+
+        function buildSub2apiBatchPayload() {
+          return {
+            accounts: state.converted.map((item) => assignRandomProxy(item.sub2apiAccount)),
           };
         }
 
@@ -1498,6 +1538,18 @@
             state.priority = Number(payload.priority);
             elements.priority.value = String(state.priority);
           }
+          if (Number.isFinite(Number(payload.concurrency))) {
+            state.concurrency = Math.max(0, parseInt(String(payload.concurrency), 10));
+            elements.concurrency.value = String(state.concurrency);
+          }
+          const configuredExpiresAt = Number(payload.expires_at ?? payload.expiresAt);
+          if (Number.isFinite(configuredExpiresAt) && configuredExpiresAt > 0) {
+            state.expiresAtOverride = Math.floor(configuredExpiresAt);
+            elements.expiresAt.value = dateInputFromUnixSeconds(state.expiresAtOverride);
+          } else {
+            state.expiresAtOverride = null;
+            elements.expiresAt.value = "";
+          }
           if (Number.isFinite(Number(payload.rate_multiplier))) {
             state.rateMultiplier = Number(payload.rate_multiplier);
             elements.rateMultiplier.value = String(state.rateMultiplier);
@@ -1600,6 +1652,8 @@
                 proxy_ids: state.selectedProxies,
                 proxy_id: state.selectedProxies.length ? state.selectedProxies[0] : null,
                 priority: state.priority,
+                concurrency: state.concurrency,
+                expires_at: state.expiresAtOverride,
                 rate_multiplier: state.rateMultiplier,
                 websocket_mode: state.websocketMode,
                 auto_passthrough: state.autoPassthrough,
@@ -1990,7 +2044,7 @@
             return;
           }
 
-          const sub2apiUrl = getSub2ApiEndpoint();
+          const sub2apiUrl = getSub2ApiAdminUrl("/admin/accounts/batch");
           const bearerToken = getSub2ApiBearerToken();
           if (!sub2apiUrl) {
             setStatus(elements.outputStatus, "请填写 sub2api 服务器地址。", "error");
@@ -2007,15 +2061,13 @@
           try {
             const data = await requestSub2ApiJson(sub2apiUrl, {
               method: "POST",
-              body: JSON.stringify(buildSub2apiImportPayload()),
+              body: JSON.stringify(buildSub2apiBatchPayload()),
             });
-            const accountCreated = Number(data.account_created ?? data.created ?? 0);
+            const accountCreated = Number(data.account_created ?? data.created ?? data.success ?? 0);
             const accountFailed = Number(data.account_failed ?? data.failed ?? 0);
-            const proxyCreated = Number(data.proxy_created ?? 0);
-            const proxyReused = Number(data.proxy_reused ?? 0);
             setStatus(
               elements.outputStatus,
-              `已导入 sub2api：账号创建 ${accountCreated}，失败 ${accountFailed}，代理创建 ${proxyCreated}，复用 ${proxyReused}。`,
+              `已导入 sub2api：账号创建 ${accountCreated}，失败 ${accountFailed}。`,
               "ok"
             );
             await refreshServerAccounts();
@@ -2101,6 +2153,17 @@
         elements.priority.addEventListener("input", () => {
           state.priority = parseInt(elements.priority.value, 10);
           if (Number.isNaN(state.priority)) state.priority = 1;
+          scheduleConvert();
+        });
+
+        elements.concurrency.addEventListener("input", () => {
+          state.concurrency = parseInt(elements.concurrency.value, 10);
+          if (Number.isNaN(state.concurrency) || state.concurrency < 0) state.concurrency = 10;
+          scheduleConvert();
+        });
+
+        elements.expiresAt.addEventListener("input", () => {
+          state.expiresAtOverride = unixSecondsFromDateInput(elements.expiresAt.value);
           scheduleConvert();
         });
 

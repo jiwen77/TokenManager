@@ -224,9 +224,19 @@
                   <span class="field-help">数值越小通常越优先。</span>
                 </div>
                 <div class="config-field">
+                  <label for="sub2api-concurrency">并发数</label>
+                  <input id="sub2api-concurrency" type="number" value="10" min="0" step="1" spellcheck="false" />
+                  <span class="field-help">写入 concurrency；0 表示不额外并发。</span>
+                </div>
+                <div class="config-field">
                   <label for="sub2api-rate-multiplier">计费倍率</label>
                   <input id="sub2api-rate-multiplier" type="number" value="1.0" step="0.1" min="0" spellcheck="false" />
                   <span class="field-help">写入 rate_multiplier。</span>
+                </div>
+                <div class="config-field">
+                  <label for="sub2api-expires-at">过期时间</label>
+                  <input id="sub2api-expires-at" type="datetime-local" step="1" spellcheck="false" />
+                  <span class="field-help">留空时按 access token 的 exp 自动写入。</span>
                 </div>
                 <div class="config-field">
                   <label for="sub2api-websocket-mode">WS mode</label>

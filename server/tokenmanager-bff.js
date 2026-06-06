@@ -29,6 +29,9 @@ const LEGACY_API_PREFIX = "/token-manager-api";
 
 const ALLOWED_PROXY_ROUTES = [
   { method: "GET", pattern: /^\/admin\/accounts$/ },
+  { method: "PUT", pattern: /^\/admin\/accounts\/\d+$/ },
+  { method: "POST", pattern: /^\/admin\/accounts\/\d+\/apply-oauth-credentials$/ },
+  { method: "POST", pattern: /^\/admin\/accounts\/\d+\/set-privacy$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/batch$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/data$/ },
   { method: "GET", pattern: /^\/admin\/groups\/all$/ },
@@ -312,6 +315,7 @@ function buildPublicConfig(config, runtimeConfig = {}) {
     rate_multiplier: normalizeFiniteNumber(runtimeConfig.rateMultiplier, 1),
     websocket_mode: runtimeConfig.websocketMode || "off",
     auto_passthrough: runtimeConfig.autoPassthrough === true,
+    set_privacy: runtimeConfig.setPrivacy === true,
     updated_at: runtimeConfig.updatedAt,
   };
 }

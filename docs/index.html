@@ -6,7 +6,7 @@
     <title>ChatGPT Session -> CPA / sub2api / Cockpit / Codex / AxonHub / Codex-Manager</title>
     <meta name="theme-color" content="#24505a" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" sizes="any" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260606-upsert-privacy" />
 
   </head>
   <body>
@@ -57,7 +57,6 @@
         <div class="actions">
           <button class="button button-secondary" id="copy-output" type="button" disabled>复制输出</button>
           <button class="button button-primary" id="download-output" type="button" disabled>下载 JSON</button>
-          <button class="button button-accent" id="import-sub2api" type="button" disabled>导入到 sub2api</button>
         </div>
       </section>
 
@@ -160,6 +159,10 @@
             </div>
             <div class="issues" id="issues"></div>
             <textarea id="output" readonly spellcheck="false" placeholder="转换后会显示 JSON。"></textarea>
+            <div class="output-import-actions" id="output-import-actions">
+              <button class="button button-accent" id="import-sub2api" type="button" disabled>导入到 sub2api</button>
+              <span class="output-import-help">仅 sub2api 输出可用；重复账号会更新已有账号。</span>
+            </div>
             <div class="status-line" id="output-status">暂无输出。</div>
           </div>
         </section>
@@ -257,6 +260,13 @@
                   <span>
                     <span class="switch-card-title">自动透传</span>
                     <span class="switch-card-help">开启后写入 extra.openai_passthrough，适合让 sub2api 对支持的模型走自动透传分支。</span>
+                  </span>
+                </label>
+                <label class="switch-card" for="sub2api-set-privacy">
+                  <input id="sub2api-set-privacy" type="checkbox" />
+                  <span>
+                    <span class="switch-card-title">Privacy 设置</span>
+                    <span class="switch-card-help">导入或更新后调用 sub2api set-privacy，尝试关闭训练数据共享。</span>
                   </span>
                 </label>
                 <div class="config-hint" id="sub2api-config-hint">服务器代理模式已启用时，保存的配置会持久化在服务器；导入请求由 TokenManager 发起。</div>
@@ -388,7 +398,7 @@
       </section>
     </main>
 
-    <script src="./app.js?v=20260606-multiline-input"></script>
+    <script src="./app.js?v=20260606-upsert-privacy"></script>
 
   </body>
 </html>

@@ -241,7 +241,7 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
     });
     assert.equal(app.response.status, 200);
     assert.match(app.body, /id="save-sub2api-config"/);
-    assert.match(app.body, /src="\.\/app\.js\?v=20260606-multiline-input"/);
+    assert.match(app.body, /src="\.\/app\.js\?v=20260606-upsert-privacy"/);
 
     const appScript = await fetchText(`${bff.baseUrl}/token-manager/app.js`, {
       headers: { Cookie: cookie },
@@ -443,6 +443,7 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
         rate_multiplier: 1.5,
         websocket_mode: "passthrough",
         auto_passthrough: true,
+        set_privacy: true,
       }),
     });
     assert.equal(saved.response.status, 200);
@@ -469,6 +470,7 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(saved.body.rate_multiplier, 1.5);
     assert.equal(saved.body.websocket_mode, "passthrough");
     assert.equal(saved.body.auto_passthrough, true);
+    assert.equal(saved.body.set_privacy, true);
     assert.equal(saved.body.sub2api_bearer_token, undefined);
     assert.doesNotMatch(JSON.stringify(saved.body), /runtime-bearer-token/);
 
@@ -497,8 +499,10 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(persisted.priority, 3);
     assert.equal(persisted.concurrency, 4);
     assert.equal(persisted.expiresAt, 1780473960);
+    assert.equal(persisted.rateMultiplier, 1.5);
     assert.equal(persisted.websocketMode, "passthrough");
     assert.equal(persisted.autoPassthrough, true);
+    assert.equal(persisted.setPrivacy, true);
     const rawDatabase = fs.readFileSync(databaseFile);
     assert.equal(rawDatabase.includes(Buffer.from("runtime-bearer-token")), false);
 
@@ -532,6 +536,7 @@ test("sqlite runtime config migrates legacy JSON and encrypts bearer token", () 
     rateMultiplier: 1.5,
     websocketMode: "ctx_pool",
     autoPassthrough: true,
+    setPrivacy: true,
   }));
 
   const store = new RuntimeConfigStore({
@@ -554,6 +559,7 @@ test("sqlite runtime config migrates legacy JSON and encrypts bearer token", () 
   assert.equal(migrated.rateMultiplier, 1.5);
   assert.equal(migrated.websocketMode, "ctx_pool");
   assert.equal(migrated.autoPassthrough, true);
+  assert.equal(migrated.setPrivacy, true);
   assert.equal(fs.readFileSync(databaseFile).includes(Buffer.from("legacy-secret-token")), false);
 });
 
@@ -704,6 +710,85 @@ test("authenticated proxy forwards batch account creation fields", async () => {
     assert.equal(upstreamRequests[0].body.accounts[0].proxy_id, 6);
     assert.equal(upstreamRequests[0].body.accounts[0].concurrency, 4);
     assert.equal(upstreamRequests[0].body.accounts[0].expires_at, 1780473960);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("authenticated proxy forwards account update and privacy endpoints", async () => {
+  const upstreamRequests = [];
+  const mock = await startMockSub2Api(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    upstreamRequests.push({
+      url: req.url,
+      method: req.method,
+      authorization: req.headers.authorization,
+      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : null,
+    });
+    if (
+      (req.url === "/api/v1/admin/accounts/42/apply-oauth-credentials" && req.method === "POST")
+      || (req.url === "/api/v1/admin/accounts/42" && req.method === "PUT")
+      || (req.url === "/api/v1/admin/accounts/42/set-privacy" && req.method === "POST")
+    ) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: { id: 42 } }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  const bff = await startBff({ sub2apiAdminBearerToken: "static-admin-token", sub2apiAdminPassword: "" }, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const apply = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts/42/apply-oauth-credentials`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "oauth",
+        credentials: { access_token: "redacted" },
+        extra: { email: "mark@example.com" },
+      }),
+    });
+    const update = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts/42`, {
+      method: "PUT",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        group_ids: [11, 13],
+        proxy_id: 6,
+        concurrency: 4,
+        confirm_mixed_channel_risk: true,
+      }),
+    });
+    const privacy = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts/42/set-privacy`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+
+    assert.equal(apply.response.status, 200);
+    assert.equal(update.response.status, 200);
+    assert.equal(privacy.response.status, 200);
+    assert.deepEqual(
+      upstreamRequests.map((request) => [request.method, request.url, request.authorization]),
+      [
+        ["POST", "/api/v1/admin/accounts/42/apply-oauth-credentials", "Bearer static-admin-token"],
+        ["PUT", "/api/v1/admin/accounts/42", "Bearer static-admin-token"],
+        ["POST", "/api/v1/admin/accounts/42/set-privacy", "Bearer static-admin-token"],
+      ],
+    );
+    assert.equal(upstreamRequests[0].body.credentials.access_token, "redacted");
+    assert.deepEqual(upstreamRequests[1].body.group_ids, [11, 13]);
+    assert.equal(upstreamRequests[1].body.confirm_mixed_channel_risk, true);
   } finally {
     await bff.close();
     await mock.close();

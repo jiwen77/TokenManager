@@ -281,6 +281,10 @@ function sanitizeRuntimeConfig(value = {}, current = {}) {
     next.autoPassthrough = normalizeBoolean(value.auto_passthrough ?? value.autoPassthrough, current.autoPassthrough ?? false);
   }
 
+  if (Object.prototype.hasOwnProperty.call(value, "set_privacy") || Object.prototype.hasOwnProperty.call(value, "setPrivacy")) {
+    next.setPrivacy = normalizeBoolean(value.set_privacy ?? value.setPrivacy, current.setPrivacy ?? false);
+  }
+
   next.updatedAt = new Date().toISOString();
   return next;
 }

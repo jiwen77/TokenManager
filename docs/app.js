@@ -30,7 +30,8 @@
           selectedProxies: [],
           sub2apiProxyEnabled: false,
           websocketMode: "off",
-          autoPassthrough: false
+          autoPassthrough: false,
+          setPrivacy: false
         };
 
         const elements = {
@@ -48,6 +49,7 @@
           issues: document.querySelector("#issues"),
           loadExample: document.querySelector("#load-example"),
           output: document.querySelector("#output"),
+          outputImportActions: document.querySelector("#output-import-actions"),
           outputStatus: document.querySelector("#output-status"),
           outputSubtitle: document.querySelector("#output-subtitle"),
           pickFiles: document.querySelector("#pick-files"),
@@ -86,6 +88,7 @@
           expiresAt: document.querySelector("#sub2api-expires-at"),
           websocketMode: document.querySelector("#sub2api-websocket-mode"),
           autoPassthrough: document.querySelector("#sub2api-auto-passthrough"),
+          setPrivacy: document.querySelector("#sub2api-set-privacy"),
           tokenmanagerPassword: document.querySelector("#tokenmanager-new-password"),
           tokenmanagerPasswordConfirm: document.querySelector("#tokenmanager-confirm-password"),
           tokenmanagerPasswordStatus: document.querySelector("#tokenmanager-password-status"),
@@ -738,6 +741,7 @@
             type: "oauth",
             expires_at: state.expiresAtOverride ?? accessTokenExpiresAt,
             auto_pause_on_expired: true,
+            confirm_mixed_channel_risk: true,
             concurrency: state.concurrency,
             priority: state.priority,
             rate_multiplier: state.rateMultiplier,
@@ -884,7 +888,150 @@
 
         function buildSub2apiBatchPayload() {
           return {
-            accounts: state.converted.map((item) => assignRandomProxy(item.sub2apiAccount)),
+            accounts: buildSub2apiImportAccounts(),
+          };
+        }
+
+        function buildSub2apiImportAccounts() {
+          return state.converted.map((item) => assignRandomProxy(item.sub2apiAccount));
+        }
+
+        function firstNonEmptyText(...values) {
+          for (const value of values) {
+            if (value === undefined || value === null) {
+              continue;
+            }
+            const text = String(value).trim();
+            if (text) {
+              return text;
+            }
+          }
+          return "";
+        }
+
+        function normalizeIdentityText(value) {
+          return firstNonEmptyText(value).toLowerCase();
+        }
+
+        function getSub2ApiRecordId(account) {
+          return firstNonEmptyText(account?.id, account?.account_id, account?.accountId, account?.uuid);
+        }
+
+        function getAccountIdentity(account) {
+          const credentials = isPlainObject(account?.credentials) ? account.credentials : {};
+          const extra = isPlainObject(account?.extra) ? account.extra : {};
+          const chatgptAccountId = normalizeIdentityText(
+            firstNonEmptyText(
+              credentials.chatgpt_account_id,
+              credentials.chatgptAccountId,
+              extra.chatgpt_account_id,
+              extra.chatgptAccountId,
+              account?.chatgpt_account_id,
+              account?.chatgptAccountId,
+            ),
+          );
+          const email = normalizeIdentityText(
+            firstNonEmptyText(
+              account?.email,
+              credentials.email,
+              extra.email,
+            ),
+          );
+          const name = normalizeIdentityText(account?.name);
+
+          return { chatgptAccountId, email, name };
+        }
+
+        function isCompatibleExistingSub2ApiAccount(existing, imported) {
+          const existingType = normalizeIdentityText(existing?.type);
+          const existingPlatform = normalizeIdentityText(existing?.platform);
+          const importedType = normalizeIdentityText(imported?.type);
+          const importedPlatform = normalizeIdentityText(imported?.platform);
+
+          if (existingType && importedType && existingType !== importedType) {
+            return false;
+          }
+          if (existingPlatform && importedPlatform && existingPlatform !== importedPlatform) {
+            return false;
+          }
+          return true;
+        }
+
+        function addExistingAccountToIndex(map, key, account) {
+          if (!key || map.has(key)) {
+            return;
+          }
+          const id = getSub2ApiRecordId(account);
+          if (!id) {
+            return;
+          }
+          map.set(key, account);
+        }
+
+        function buildExistingAccountIndex(accounts) {
+          const byChatgptAccountId = new Map();
+          const byEmail = new Map();
+          const byName = new Map();
+
+          accounts.forEach((account) => {
+            const identity = getAccountIdentity(account);
+            addExistingAccountToIndex(byChatgptAccountId, identity.chatgptAccountId, account);
+            addExistingAccountToIndex(byEmail, identity.email, account);
+            addExistingAccountToIndex(byName, identity.name, account);
+          });
+
+          return { byChatgptAccountId, byEmail, byName };
+        }
+
+        function findExistingAccountForImport(account, index) {
+          const identity = getAccountIdentity(account);
+          const candidates = [
+            identity.chatgptAccountId ? index.byChatgptAccountId.get(identity.chatgptAccountId) : undefined,
+            identity.email ? index.byEmail.get(identity.email) : undefined,
+            !identity.chatgptAccountId && !identity.email && identity.name ? index.byName.get(identity.name) : undefined,
+          ].filter(Boolean);
+
+          return candidates.find((candidate) => isCompatibleExistingSub2ApiAccount(candidate, account));
+        }
+
+        function getImportIdentityKey(account) {
+          const identity = getAccountIdentity(account);
+          if (identity.chatgptAccountId) {
+            return `chatgpt:${identity.chatgptAccountId}`;
+          }
+          if (identity.email) {
+            return `email:${identity.email}`;
+          }
+          return "";
+        }
+
+        function buildAccountUpdatePayload(account) {
+          const payload = {
+            name: account.name,
+            type: account.type,
+            concurrency: account.concurrency,
+            priority: account.priority,
+            rate_multiplier: account.rate_multiplier,
+            expires_at: account.expires_at,
+            auto_pause_on_expired: account.auto_pause_on_expired,
+            confirm_mixed_channel_risk: true,
+          };
+
+          if (Object.prototype.hasOwnProperty.call(account, "group_ids")) {
+            payload.group_ids = account.group_ids;
+          }
+          if (Object.prototype.hasOwnProperty.call(account, "proxy_id")) {
+            payload.proxy_id = account.proxy_id;
+          }
+
+          return stripUnavailable(payload) || {};
+        }
+
+        function buildApplyOAuthCredentialsPayload(account) {
+          return {
+            type: account.type || "oauth",
+            credentials: account.credentials || {},
+            extra: account.extra || {},
           };
         }
 
@@ -982,6 +1129,7 @@
         function updateSub2ApiToolsVisibility() {
           const isVisible = isSub2ApiFormat();
           elements.sub2apiTools.hidden = !isVisible;
+          elements.outputImportActions.hidden = !isVisible;
           elements.importSub2api.hidden = !isVisible;
         }
 
@@ -1667,6 +1815,8 @@
           elements.websocketMode.value = state.websocketMode;
           state.autoPassthrough = payload.auto_passthrough === true || payload.autoPassthrough === true;
           elements.autoPassthrough.checked = state.autoPassthrough;
+          state.setPrivacy = payload.set_privacy === true || payload.setPrivacy === true;
+          elements.setPrivacy.checked = state.setPrivacy;
           const tokenPreview = firstNonEmpty(payload.sub2api_bearer_token_preview, payload.sub2apiBearerTokenPreview);
           if (tokenPreview) {
             elements.sub2apiToken.placeholder = `已保存：${tokenPreview}（留空不覆盖）`;
@@ -1765,6 +1915,7 @@
                 rate_multiplier: state.rateMultiplier,
                 websocket_mode: state.websocketMode,
                 auto_passthrough: state.autoPassthrough,
+                set_privacy: state.setPrivacy,
               }),
             });
             const payload = await readJsonResponse(response);
@@ -2085,6 +2236,100 @@
           }
         }
 
+        async function fetchServerAccountsForUpsert() {
+          const pageSize = 200;
+          const maxPages = 5;
+          const accounts = [];
+          let total = 0;
+
+          for (let page = 1; page <= maxPages; page += 1) {
+            const url = buildUrlWithQuery(getSub2ApiAdminUrl("/admin/accounts"), {
+              page,
+              page_size: pageSize,
+              sort_by: "created_at",
+              sort_order: "desc",
+            });
+            const payload = await requestSub2ApiJson(url);
+            const extracted = extractPaginatedItems(payload);
+            accounts.push(...extracted.items);
+            total = extracted.total;
+
+            if (!extracted.items.length || extracted.items.length < pageSize || accounts.length >= total) {
+              break;
+            }
+          }
+
+          return { accounts, total };
+        }
+
+        function getBatchCreateStats(data) {
+          const results = Array.isArray(data?.results) ? data.results : [];
+          const successfulResults = results.filter((item) => item?.success !== false);
+          const failedResults = results.filter((item) => item?.success === false);
+          const created = Number(
+            data?.account_created
+              ?? data?.created
+              ?? data?.success
+              ?? (results.length ? successfulResults.length : 0),
+          );
+          const failed = Number(
+            data?.account_failed
+              ?? data?.failed
+              ?? (results.length ? failedResults.length : 0),
+          );
+
+          return {
+            created: Number.isFinite(created) ? created : 0,
+            failed: Number.isFinite(failed) ? failed : 0,
+          };
+        }
+
+        function getCreatedAccountIds(data) {
+          const results = Array.isArray(data?.results) ? data.results : [];
+          return results
+            .filter((item) => item?.success !== false)
+            .map((item) => getSub2ApiRecordId(item))
+            .filter(Boolean);
+        }
+
+        async function applyOAuthCredentialsToExistingAccount(accountId, account) {
+          await requestSub2ApiJson(getSub2ApiAdminUrl(`/admin/accounts/${encodeURIComponent(accountId)}/apply-oauth-credentials`), {
+            method: "POST",
+            body: JSON.stringify(buildApplyOAuthCredentialsPayload(account)),
+          });
+        }
+
+        async function updateExistingSub2ApiAccount(accountId, account) {
+          await requestSub2ApiJson(getSub2ApiAdminUrl(`/admin/accounts/${encodeURIComponent(accountId)}`), {
+            method: "PUT",
+            body: JSON.stringify(buildAccountUpdatePayload(account)),
+          });
+        }
+
+        async function setSub2ApiAccountPrivacy(accountId) {
+          await requestSub2ApiJson(getSub2ApiAdminUrl(`/admin/accounts/${encodeURIComponent(accountId)}/set-privacy`), {
+            method: "POST",
+          });
+        }
+
+        async function applyPrivacyToAccounts(accountIds) {
+          const stats = { success: 0, failed: 0 };
+          if (!state.setPrivacy || !accountIds.length) {
+            return stats;
+          }
+
+          for (const accountId of accountIds) {
+            try {
+              await setSub2ApiAccountPrivacy(accountId);
+              stats.success += 1;
+            } catch {
+              stats.failed += 1;
+            }
+          }
+
+          return stats;
+        }
+
         // 新增功能：异步拉取 sub2api 的分组和代理列表元数据并渲染选择器
         async function fetchSub2ApiMeta() {
           const bearerToken = getSub2ApiBearerToken();
@@ -2164,18 +2409,86 @@
           }
 
           elements.importSub2api.disabled = true;
-          setStatus(elements.outputStatus, "正在导入到 sub2api...", "ok");
+          setStatus(elements.outputStatus, "正在检查 sub2api 已有账号，重复账号会更新而不是新建...", "ok");
 
           try {
-            const data = await requestSub2ApiJson(sub2apiUrl, {
-              method: "POST",
-              body: JSON.stringify(buildSub2apiBatchPayload()),
+            const importAccounts = buildSub2apiImportAccounts();
+            const { accounts: existingAccounts, total } = await fetchServerAccountsForUpsert();
+            const existingIndex = buildExistingAccountIndex(existingAccounts);
+            const updatesById = new Map();
+            const createAccounts = [];
+            const createKeyIndex = new Map();
+            let inputDuplicates = 0;
+
+            importAccounts.forEach((account) => {
+              const existing = findExistingAccountForImport(account, existingIndex);
+              const existingId = existing ? getSub2ApiRecordId(existing) : "";
+              if (existingId) {
+                if (updatesById.has(existingId)) {
+                  inputDuplicates += 1;
+                }
+                updatesById.set(existingId, { account, existing });
+                return;
+              }
+
+              const identityKey = getImportIdentityKey(account);
+              if (identityKey && createKeyIndex.has(identityKey)) {
+                createAccounts[createKeyIndex.get(identityKey)] = account;
+                inputDuplicates += 1;
+                return;
+              }
+
+              if (identityKey) {
+                createKeyIndex.set(identityKey, createAccounts.length);
+              }
+              createAccounts.push(account);
             });
-            const accountCreated = Number(data.account_created ?? data.created ?? data.success ?? 0);
-            const accountFailed = Number(data.account_failed ?? data.failed ?? 0);
+
+            let accountUpdated = 0;
+            let accountFailed = 0;
+            const privacyAccountIds = [];
+
+            if (updatesById.size) {
+              setStatus(elements.outputStatus, `已发现 ${updatesById.size} 个重复账号，正在更新凭据与绑定配置...`, "ok");
+            }
+
+            for (const [accountId, item] of updatesById.entries()) {
+              try {
+                await applyOAuthCredentialsToExistingAccount(accountId, item.account);
+                await updateExistingSub2ApiAccount(accountId, item.account);
+                accountUpdated += 1;
+                privacyAccountIds.push(accountId);
+              } catch {
+                accountFailed += 1;
+              }
+            }
+
+            let accountCreated = 0;
+            if (createAccounts.length) {
+              setStatus(elements.outputStatus, `正在创建 ${createAccounts.length} 个新账号...`, "ok");
+              const data = await requestSub2ApiJson(sub2apiUrl, {
+                method: "POST",
+                body: JSON.stringify({ accounts: createAccounts }),
+              });
+              const createStats = getBatchCreateStats(data);
+              accountCreated = createStats.created;
+              accountFailed += createStats.failed;
+              privacyAccountIds.push(...getCreatedAccountIds(data));
+            }
+
+            const privacyStats = await applyPrivacyToAccounts(privacyAccountIds);
+            const privacyText = state.setPrivacy
+              ? `；privacy 成功 ${privacyStats.success}，失败/跳过 ${privacyStats.failed}`
+              : "";
+            const duplicateText = inputDuplicates
+              ? `；输入内重复 ${inputDuplicates} 个已按最后一次内容处理`
+              : "";
+            const coverageText = total > existingAccounts.length
+              ? `；已检查最近 ${existingAccounts.length}/${total} 个服务器账号`
+              : "";
             setStatus(
               elements.outputStatus,
-              `已导入 sub2api：账号创建 ${accountCreated}，失败 ${accountFailed}。`,
+              `已导入 sub2api：创建 ${accountCreated}，更新 ${accountUpdated}，失败 ${accountFailed}${privacyText}${duplicateText}${coverageText}。`,
               "ok"
             );
             await refreshServerAccounts();
@@ -2289,6 +2602,10 @@
         elements.autoPassthrough.addEventListener("change", () => {
           state.autoPassthrough = elements.autoPassthrough.checked === true;
           scheduleConvert();
+        });
+
+        elements.setPrivacy.addEventListener("change", () => {
+          state.setPrivacy = elements.setPrivacy.checked === true;
         });
 
         elements.groups.addEventListener("change", () => {

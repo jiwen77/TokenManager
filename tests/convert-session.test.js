@@ -165,6 +165,12 @@ function dispatchWithTarget(element, type, target) {
   element.listeners[type]({ target });
 }
 
+async function flushAsync(turns = 5) {
+  for (let index = 0; index < turns; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 function jwtWithPayload(payload) {
   return [
     Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url"),
@@ -552,6 +558,7 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
           rate_multiplier: 1.5,
           websocket_mode: "passthrough",
           auto_passthrough: true,
+          set_privacy: true,
         }),
       };
     },
@@ -593,6 +600,7 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
   assert.equal(elements.get("#sub2api-rate-multiplier").value, "1.5");
   assert.equal(elements.get("#sub2api-websocket-mode").value, "passthrough");
   assert.equal(elements.get("#sub2api-auto-passthrough").checked, true);
+  assert.equal(elements.get("#sub2api-set-privacy").checked, true);
 }
 
 function testCustomGroupPickerSelectsVisibleGroupsAndClears() {
@@ -889,6 +897,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
             rate_multiplier: 1.5,
             websocket_mode: "ctx_pool",
             auto_passthrough: true,
+            set_privacy: true,
           }),
         };
       }
@@ -927,6 +936,8 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   dispatch(elements.get("#sub2api-websocket-mode"), "change");
   elements.get("#sub2api-auto-passthrough").checked = true;
   dispatch(elements.get("#sub2api-auto-passthrough"), "change");
+  elements.get("#sub2api-set-privacy").checked = true;
+  dispatch(elements.get("#sub2api-set-privacy"), "change");
   dispatch(elements.get("#save-sub2api-config"), "click");
 
   await new Promise((resolve) => setImmediate(resolve));
@@ -943,6 +954,7 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   assert.equal(capturedPosts[0].rate_multiplier, 1.5);
   assert.equal(capturedPosts[0].websocket_mode, "ctx_pool");
   assert.equal(capturedPosts[0].auto_passthrough, true);
+  assert.equal(capturedPosts[0].set_privacy, true);
   assert.equal(elements.get("#sub2api-token").value, "");
   assert.equal(elements.get("#sub2api-token").placeholder, "已保存：runtim••••••••（留空不覆盖）");
   assert.match(elements.get("#sub2api-config-status").textContent, /保存成功/);
@@ -1103,6 +1115,128 @@ async function testImportToSub2ApiRandomlyAssignsSelectedProxies() {
     body.accounts.map((account) => account.proxy_id),
     [101, 202],
   );
+}
+
+async function testImportToSub2ApiUpdatesDuplicateAndSetsPrivacy() {
+  const capturedRequests = [];
+  const { elements } = loadPageScript({
+    fetch: async (url, options = {}) => {
+      capturedRequests.push({ url: String(url), options });
+      const text = String(url);
+
+      if (text.includes("/admin/accounts?page=1&page_size=200")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            data: {
+              items: [{
+                id: 42,
+                name: "Existing Mark",
+                platform: "openai",
+                type: "oauth",
+                credentials: {
+                  email: "mark@example.com",
+                  chatgpt_account_id: "chatgpt-account-1",
+                },
+                extra: {},
+              }],
+              total: 1,
+            },
+          }),
+        };
+      }
+
+      if (text.includes("/admin/accounts?page=1&page_size=50")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { items: [], total: 1 } }),
+        };
+      }
+
+      if (text.endsWith("/admin/accounts/42/apply-oauth-credentials") && options.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { id: 42 } }),
+        };
+      }
+
+      if (text.endsWith("/admin/accounts/42") && options.method === "PUT") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { id: 42 } }),
+        };
+      }
+
+      if (text.endsWith("/admin/accounts/42/set-privacy") && options.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { id: 42, extra: { privacy_mode: "disabled" } } }),
+        };
+      }
+
+      throw new Error(`unexpected fetch ${text}`);
+    },
+  });
+
+  const accessToken = jwtWithPayload({
+    exp: 1780473960,
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "chatgpt-account-1",
+    },
+  });
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+  elements.get("#sub2api-groups").selectedOptions = [{ value: "11" }, { value: "13" }];
+  dispatch(elements.get("#sub2api-groups"), "change");
+  elements.get("#sub2api-proxy").selectedOptions = [{ value: "101" }];
+  dispatch(elements.get("#sub2api-proxy"), "change");
+  elements.get("#sub2api-concurrency").value = "4";
+  dispatch(elements.get("#sub2api-concurrency"), "input");
+  elements.get("#sub2api-set-privacy").checked = true;
+  dispatch(elements.get("#sub2api-set-privacy"), "change");
+  elements.get("#session-input").value = JSON.stringify({
+    user: { email: "mark@example.com" },
+    accessToken,
+  });
+  dispatch(elements.get("#session-input"), "input");
+  dispatch(elements.get("#import-sub2api"), "click");
+
+  await flushAsync();
+
+  assert.equal(
+    capturedRequests.some((request) => String(request.url).endsWith("/admin/accounts/batch")),
+    false,
+    "duplicate import should not create a second account through batch",
+  );
+
+  const applyRequest = capturedRequests.find((request) => String(request.url).endsWith("/admin/accounts/42/apply-oauth-credentials"));
+  assert.ok(applyRequest, "duplicate import should apply refreshed OAuth credentials");
+  const applyBody = JSON.parse(applyRequest.options.body);
+  assert.equal(applyBody.type, "oauth");
+  assert.equal(applyBody.credentials.access_token, accessToken);
+  assert.equal(applyBody.credentials.email, "mark@example.com");
+
+  const updateRequest = capturedRequests.find((request) => String(request.url).endsWith("/admin/accounts/42") && request.options.method === "PUT");
+  assert.ok(updateRequest, "duplicate import should update account binding settings");
+  const updateBody = JSON.parse(updateRequest.options.body);
+  assert.deepEqual(updateBody.group_ids, [11, 13]);
+  assert.equal(updateBody.proxy_id, 101);
+  assert.equal(updateBody.concurrency, 4);
+  assert.equal(updateBody.confirm_mixed_channel_risk, true);
+  assert.equal(updateBody.credentials, undefined);
+  assert.equal(updateBody.extra, undefined);
+
+  assert.ok(
+    capturedRequests.some((request) => String(request.url).endsWith("/admin/accounts/42/set-privacy") && request.options.method === "POST"),
+    "privacy switch should call set-privacy for updated accounts",
+  );
+  assert.match(elements.get("#output-status").textContent, /创建 0，更新 1，失败 0；privacy 成功 1/);
 }
 
 async function testRefreshServerAccountsFetchesPersistedAccounts() {
@@ -1291,6 +1425,7 @@ async function main() {
   await testSaveSub2apiConfigPostsServerSettings();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
   await testImportToSub2ApiRandomlyAssignsSelectedProxies();
+  await testImportToSub2ApiUpdatesDuplicateAndSetsPrivacy();
   await testRefreshServerAccountsFetchesPersistedAccounts();
   await testUrlTokenDoesNotHydrateBearerOrFetchAccounts();
   await testFetchSub2ApiMetaUsesSub2apiAllEndpoints();

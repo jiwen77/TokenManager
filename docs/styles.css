@@ -308,71 +308,6 @@
         font-weight: 700;
       }
 
-      .discord-card {
-        position: relative;
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
-        gap: 12px 14px;
-        align-items: start;
-        margin-bottom: 12px;
-        padding: 14px 14px 52px;
-        border: 1px solid rgba(88, 101, 242, 0.28);
-        border-radius: var(--radius);
-        background: #f3f5ff;
-        color: #243064;
-        text-decoration: none;
-      }
-
-      .discord-card:hover {
-        border-color: rgba(88, 101, 242, 0.5);
-        background: #eef1ff;
-      }
-
-      .discord-icon {
-        display: grid;
-        width: 44px;
-        height: 44px;
-        place-items: center;
-        border-radius: var(--radius);
-        background: #5865f2;
-        color: #fff;
-      }
-
-      .discord-icon svg {
-        width: 27px;
-        height: 27px;
-        fill: currentColor;
-      }
-
-      .discord-copy strong {
-        display: block;
-        margin-bottom: 4px;
-        color: #1f2a62;
-        font-size: 0.98rem;
-        line-height: 1.35;
-      }
-
-      .discord-copy span {
-        display: block;
-        color: #46517f;
-        font-size: 0.88rem;
-        line-height: 1.45;
-      }
-
-      .discord-action {
-        position: absolute;
-        right: 14px;
-        bottom: 14px;
-        min-height: 32px;
-        padding: 6px 12px;
-        border-radius: 6px;
-        background: #5865f2;
-        color: #fff;
-        font-weight: 800;
-        white-space: nowrap;
-        box-shadow: 0 8px 18px rgba(88, 101, 242, 0.22);
-      }
-
       .input-actions {
         display: flex;
         flex-wrap: wrap;
@@ -1197,10 +1132,6 @@
 
         .summary {
           grid-template-columns: 1fr;
-        }
-
-        .discord-card {
-          grid-template-columns: auto minmax(0, 1fr);
         }
 
         .col-expiry,

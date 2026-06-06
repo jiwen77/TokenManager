@@ -19,7 +19,9 @@ function createFakeElement(selector, options = {}) {
     selectedOptions: [],
     style: {},
     textContent: "",
-    value: "",
+    title: options.title || "",
+    type: options.type || "",
+    value: options.value || "",
     classList: {
       add(name) {
         classes.add(name);
@@ -62,6 +64,20 @@ function loadPageScript(overrides = {}) {
   assert.ok(match, "expected docs/index.html to contain one inline script");
 
   const elements = new Map();
+  const htmlIdAttributes = new Map(
+    Array.from(html.matchAll(/<[^>]+\bid=(['"])(.*?)\1[^>]*>/g), (match) => {
+      const [, , id] = match;
+      const tag = match[0];
+      const type = tag.match(/\btype=(['"])(.*?)\1/);
+      const value = tag.match(/\bvalue=(['"])(.*?)\1/);
+      const title = tag.match(/\btitle=(['"])(.*?)\1/);
+      return [id, {
+        type: type?.[2] || "",
+        value: value?.[2] || "",
+        title: title?.[2] || "",
+      }];
+    })
+  );
   const formatButtons = ["sub2api", "cpa", "cockpit", "9router", "codex", "axonhub", "codexmanager"].map((format) =>
     createFakeElement(`[data-format="${format}"]`, { dataset: { format } })
   );
@@ -76,7 +92,8 @@ function loadPageScript(overrides = {}) {
     },
     querySelector(selector) {
       if (!elements.has(selector)) {
-        elements.set(selector, createFakeElement(selector));
+        const id = selector.startsWith("#") ? selector.slice(1) : "";
+        elements.set(selector, createFakeElement(selector, htmlIdAttributes.get(id) || {}));
       }
       return elements.get(selector);
     },
@@ -451,6 +468,27 @@ function testCodexManagerAuthJsonPreservesRealRefreshAndMetadata() {
 }
 
 
+function testSub2apiTokenVisibilityToggle() {
+  const { elements } = loadPageScript();
+  const tokenInput = elements.get("#sub2api-token");
+  const toggleButton = elements.get("#toggle-sub2api-token");
+
+  assert.equal(tokenInput.type, "password");
+  assert.equal(toggleButton.title, "显示 Bearer Token");
+
+  dispatch(toggleButton, "click");
+  assert.equal(tokenInput.type, "text");
+  assert.equal(toggleButton.attributes["aria-label"], "隐藏 Bearer Token");
+  assert.equal(toggleButton.attributes["aria-pressed"], "true");
+  assert.equal(toggleButton.title, "隐藏 Bearer Token");
+
+  dispatch(toggleButton, "click");
+  assert.equal(tokenInput.type, "password");
+  assert.equal(toggleButton.attributes["aria-label"], "显示 Bearer Token");
+  assert.equal(toggleButton.attributes["aria-pressed"], "false");
+  assert.equal(toggleButton.title, "显示 Bearer Token");
+}
+
 function testSub2apiImportToolsOnlyVisibleForSub2apiFormat() {
   const { elements, formatButtons } = loadPageScript();
   const cpaButton = formatButtons.find((button) => button.dataset.format === "cpa");
@@ -661,6 +699,7 @@ async function main() {
   testCodexAuthJsonPreservesRealRefreshTokenAndIdToken();
   testCodexManagerAuthJsonUsesEmptyRefreshTokenWhenMissing();
   testCodexManagerAuthJsonPreservesRealRefreshAndMetadata();
+  testSub2apiTokenVisibilityToggle();
   testSub2apiImportToolsOnlyVisibleForSub2apiFormat();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
   await testRefreshServerAccountsFetchesPersistedAccounts();

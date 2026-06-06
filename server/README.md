@@ -18,6 +18,12 @@ TOKENMANAGER_PORT=8787
 
 Caddy 对 `/token-manager/*` 使用 `forward_auth 127.0.0.1:8787 { uri /token-manager-auth/check }`。未登录时 BFF 会返回一个 HTML 密码表单；登录成功后写入 HttpOnly Cookie，再放行静态页面。
 
+登录信息建议这样保存：
+
+- `.env`/systemd `EnvironmentFile` 保存 `TOKENMANAGER_PASSWORD_HASH` 和 `TOKENMANAGER_SESSION_SECRET`。
+- 不要把 TokenManager 明文登录密码写入 `.env`，更不要提交到 git；服务校验只需要哈希。
+- 如需临时留存明文密码用于找回，应放在服务器 root-only 文件或密码管理器中，权限建议 `600`；确认已记录后可以删除该明文文件。
+
 ## 可选：服务端代理 sub2api 管理接口
 
 如果想让浏览器永远看不到 sub2api 管理 token，再额外配置下面的 sub2api 变量并开放 `/token-manager-api/*` 到 BFF。
@@ -47,7 +53,7 @@ TOKENMANAGER_PORT=8787
 printf '%s' '你的登录密码' | node server/tokenmanager-bff.js hash-password
 ```
 
-生产环境建议由 systemd `EnvironmentFile=` 或仅服务器上的 `.env` 提供变量；不要提交 `.env`。
+生产环境建议由 systemd `EnvironmentFile=` 或仅服务器上的 `.env` 提供变量；不要提交 `.env`。TokenManager 登录密码只写入 `TOKENMANAGER_PASSWORD_HASH` 的哈希值，明文密码应放入密码管理器或 root-only 临时文件，不应放进 `.env`。
 
 ## Caddy 路由
 

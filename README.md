@@ -17,7 +17,8 @@
 
 - 没有页面访问密码的人拿不到真正的 TokenManager 工具页面。
 - 登录表单只有密码，不需要用户名，也不会触发浏览器 Basic Auth 弹窗。
-- 进入工具页面后，`sub2api URL`、`Bearer Token`、分组、代理等仍可手动/自定义输入。
+- TokenManager 自身登录配置只应放在服务器运行环境：`.env`/systemd `EnvironmentFile` 保存 `TOKENMANAGER_PASSWORD_HASH` 和 `TOKENMANAGER_SESSION_SECRET`，不要保存或提交明文登录密码。
+- 进入工具页面后，`sub2api URL`、`Bearer Token`、分组、代理等仍可手动/自定义输入；Bearer Token 输入框默认隐藏，可用眼睛按钮临时显示/隐藏。
 - 转换预览仍在浏览器本地完成，不写入 localStorage/sessionStorage。
 - 点击导入/刷新时，浏览器会把你在页面里填写的 sub2api URL 和 Bearer Token 用于请求 sub2api。
 - 不再支持从 `/token-manager/?token=...` 自动读取 Bearer Token，避免敏感 token 进入浏览器历史、日志或分享链接。

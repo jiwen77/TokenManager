@@ -1580,6 +1580,9 @@ async function testServerAccountSearchSelectionAndBatchActions() {
       if (String(url).endsWith("/admin/accounts/7") && options.method === "PUT") {
         return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 7 } }) };
       }
+      if (String(url).endsWith("/admin/accounts/7") && options.method === "DELETE") {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 7 } }) };
+      }
       if (String(url).endsWith("/admin/accounts/7/set-privacy") && options.method === "POST") {
         return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 7 } }) };
       }
@@ -1617,6 +1620,7 @@ async function testServerAccountSearchSelectionAndBatchActions() {
   assert.match(elements.get("#server-account-body").innerHTML, /关闭 Privacy/);
   assert.match(elements.get("#server-account-body").innerHTML, /server-switch-label">启用/);
   assert.match(elements.get("#server-account-body").innerHTML, /server-switch-label">调度/);
+  assert.match(elements.get("#server-account-body").innerHTML, /trash-icon/);
   assert.doesNotMatch(elements.get("#server-account-body").innerHTML, /server-switch-state/);
 
   dispatch(elements.get("#toggle-visible-server-account-selection"), "click");
@@ -1707,6 +1711,34 @@ async function testServerAccountSearchSelectionAndBatchActions() {
       && JSON.parse(request.options.body).status === "active"
     ),
     "enable account should update sub2api account status",
+  );
+
+  dispatch(elements.get("#delete-selected-server-accounts"), "click");
+  await flushAsync();
+
+  assert.ok(
+    capturedRequests.some((request) =>
+      request.url.endsWith("/admin/accounts/7")
+      && request.options.method === "DELETE"
+    ),
+    "batch delete should call sub2api account delete endpoint",
+  );
+
+  dispatchWithTarget(elements.get("#server-account-body"), "click", {
+    dataset: {},
+    closest(selector) {
+      assert.equal(selector, "[data-server-action][data-server-account-id]");
+      return { dataset: { serverAction: "delete-account", serverAccountId: "7" }, disabled: false };
+    },
+  });
+  await flushAsync();
+
+  assert.ok(
+    capturedRequests.filter((request) =>
+      request.url.endsWith("/admin/accounts/7")
+      && request.options.method === "DELETE"
+    ).length >= 2,
+    "row delete should call sub2api account delete endpoint",
   );
 }
 

@@ -451,8 +451,8 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
     assert.doesNotMatch(app.body, /style="/);
     assert.match(app.body, /id="save-sub2api-config"/);
     assert.match(app.body, /id="logout-button"/);
-    assert.match(app.body, /href="\.\/styles\.css\?v=20260607-account-inactive-status"/);
-    assert.match(app.body, /src="\.\/app\.js\?v=20260607-account-inactive-status"/);
+    assert.match(app.body, /href="\.\/styles\.css\?v=20260607-delete-accounts"/);
+    assert.match(app.body, /src="\.\/app\.js\?v=20260607-delete-accounts"/);
 
     const appScript = await fetchText(`${bff.baseUrl}/token-manager/app.js`, {
       headers: { Cookie: cookie },
@@ -488,6 +488,13 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
     });
     assert.equal(schedulable.response.status, 200);
     assert.equal(upstreamRequests.some((url) => url === "/api/v1/admin/accounts/7/schedulable"), true);
+
+    const deleted = await fetchJson(`${bff.baseUrl}/token-manager/api/admin/accounts/7`, {
+      method: "DELETE",
+      headers: { Cookie: cookie },
+    });
+    assert.equal(deleted.response.status, 200);
+    assert.equal(upstreamRequests.some((url) => url === "/api/v1/admin/accounts/7"), true);
   } finally {
     await bff.close();
     await mock.close();
@@ -1059,6 +1066,7 @@ test("authenticated proxy forwards account update and privacy endpoints", async 
     if (
       (req.url === "/api/v1/admin/accounts/42/apply-oauth-credentials" && req.method === "POST")
       || (req.url === "/api/v1/admin/accounts/42" && req.method === "PUT")
+      || (req.url === "/api/v1/admin/accounts/42" && req.method === "DELETE")
       || (req.url === "/api/v1/admin/accounts/42/set-privacy" && req.method === "POST")
     ) {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -1101,16 +1109,22 @@ test("authenticated proxy forwards account update and privacy endpoints", async 
       method: "POST",
       headers: { Cookie: cookie },
     });
+    const deleted = await fetchJson(`${bff.baseUrl}/token-manager-api/admin/accounts/42`, {
+      method: "DELETE",
+      headers: { Cookie: cookie },
+    });
 
     assert.equal(apply.response.status, 200);
     assert.equal(update.response.status, 200);
     assert.equal(privacy.response.status, 200);
+    assert.equal(deleted.response.status, 200);
     assert.deepEqual(
       upstreamRequests.map((request) => [request.method, request.url, request.authorization]),
       [
         ["POST", "/api/v1/admin/accounts/42/apply-oauth-credentials", "Bearer static-admin-token"],
         ["PUT", "/api/v1/admin/accounts/42", "Bearer static-admin-token"],
         ["POST", "/api/v1/admin/accounts/42/set-privacy", "Bearer static-admin-token"],
+        ["DELETE", "/api/v1/admin/accounts/42", "Bearer static-admin-token"],
       ],
     );
     assert.equal(upstreamRequests[0].body.credentials.access_token, "redacted");

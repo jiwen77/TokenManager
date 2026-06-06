@@ -155,7 +155,7 @@ systemctl restart tokenmanager-bff
 
 ## Allowed sub2api proxy routes
 
-The proxy is intentionally narrow. It currently allows account list/update/import, account privacy/schedulable operations, group list, and proxy list endpoints required by the UI. Do not widen the allowlist unless the UI needs the endpoint and the response is safe to expose after sanitization.
+The proxy is intentionally narrow. It currently allows account list/update/delete/import, account privacy/schedulable operations, group list, and proxy list endpoints required by the UI. Do not widen the allowlist unless the UI needs the endpoint and the response is safe to expose after sanitization.
 
 ## Publishing checklist
 

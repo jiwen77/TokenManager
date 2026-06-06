@@ -1394,7 +1394,8 @@
       }
 
       .server-bulk-stop:not(:disabled),
-      .server-bulk-disable:not(:disabled) {
+      .server-bulk-disable:not(:disabled),
+      .server-bulk-delete:not(:disabled) {
         border-color: rgba(163, 59, 59, 0.30);
         background: rgba(163, 59, 59, 0.10);
         color: var(--danger);
@@ -1420,6 +1421,26 @@
       .server-action-toggle:disabled {
         cursor: default;
         opacity: 1;
+      }
+
+      .server-action-danger {
+        border-color: rgba(163, 59, 59, 0.30);
+        background: rgba(163, 59, 59, 0.10);
+        color: var(--danger);
+        font-weight: 950;
+      }
+
+      .server-action-danger:hover:not(:disabled),
+      .server-bulk-delete:hover:not(:disabled) {
+        border-color: rgba(163, 59, 59, 0.45);
+        background: rgba(163, 59, 59, 0.16);
+      }
+
+      .trash-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
       }
 
       .server-switch {

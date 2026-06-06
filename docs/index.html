@@ -6,7 +6,7 @@
     <title>ChatGPT Session -> CPA / sub2api / Cockpit / Codex / AxonHub / Codex-Manager</title>
     <meta name="theme-color" content="#24505a" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" sizes="any" />
-    <link rel="stylesheet" href="./styles.css?v=20260607-account-inactive-status" />
+    <link rel="stylesheet" href="./styles.css?v=20260607-delete-accounts" />
 
   </head>
   <body>
@@ -343,6 +343,7 @@
                 <button class="tiny-button server-bulk-action server-bulk-start" id="start-selected-server-account-schedule" type="button" disabled>启动调度</button>
                 <button class="tiny-button server-bulk-action server-bulk-stop" id="stop-selected-server-account-schedule" type="button" disabled>关闭调度</button>
                 <button class="tiny-button server-bulk-action server-bulk-privacy" id="privacy-selected-server-accounts" type="button" disabled>设置 privacy</button>
+                <button class="tiny-button server-bulk-action server-bulk-delete" id="delete-selected-server-accounts" type="button" disabled><span class="trash-icon" aria-hidden="true">🗑</span>删除账号</button>
               </div>
             </div>
             <div class="server-selection-summary" id="server-account-selection-summary">未选择账号。</div>
@@ -382,7 +383,7 @@
       </section>
     </main>
 
-    <script src="./app.js?v=20260607-account-inactive-status"></script>
+    <script src="./app.js?v=20260607-delete-accounts"></script>
 
   </body>
 </html>

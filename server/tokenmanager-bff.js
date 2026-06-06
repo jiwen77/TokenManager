@@ -33,6 +33,7 @@ const LEGACY_API_PREFIX = "/token-manager-api";
 const ALLOWED_PROXY_ROUTES = [
   { method: "GET", pattern: /^\/admin\/accounts$/ },
   { method: "PUT", pattern: /^\/admin\/accounts\/\d+$/ },
+  { method: "DELETE", pattern: /^\/admin\/accounts\/\d+$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/\d+\/apply-oauth-credentials$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/\d+\/set-privacy$/ },
   { method: "POST", pattern: /^\/admin\/accounts\/\d+\/schedulable$/ },

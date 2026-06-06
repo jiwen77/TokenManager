@@ -67,6 +67,7 @@
           stopSelectedServerAccountSchedule: document.querySelector("#stop-selected-server-account-schedule"),
           enableSelectedServerAccounts: document.querySelector("#enable-selected-server-accounts"),
           disableSelectedServerAccounts: document.querySelector("#disable-selected-server-accounts"),
+          deleteSelectedServerAccounts: document.querySelector("#delete-selected-server-accounts"),
           saveSub2apiConfig: document.querySelector("#save-sub2api-config"),
           saveTokenmanagerPassword: document.querySelector("#save-tokenmanager-password"),
           serverAccountStatus: document.querySelector("#server-account-status"),
@@ -2725,6 +2726,7 @@
             elements.startSelectedServerAccountSchedule,
             elements.stopSelectedServerAccountSchedule,
             elements.privacySelectedServerAccounts,
+            elements.deleteSelectedServerAccounts,
           ].forEach((button) => {
             button.disabled = selectedCount === 0;
           });
@@ -2812,6 +2814,14 @@
                         aria-pressed="${privacyMeta.actionDisabled ? "true" : "false"}"
                         title="${escapeHtml(privacyMeta.title)}"
                       >${escapeHtml(privacyMeta.actionLabel)}</button>
+                      <button
+                        class="tiny-button server-action-danger server-action-delete"
+                        type="button"
+                        data-server-action="delete-account"
+                        data-server-account-id="${escapeHtml(id)}"
+                        title="删除账号"
+                        aria-label="删除 ${escapeHtml(display.name || id || "账号")}"
+                      ><span class="trash-icon" aria-hidden="true">🗑</span><span>删除</span></button>
                     </div>
                   </div>
 
@@ -3112,6 +3122,12 @@
           });
         }
 
+        async function deleteServerAccount(accountId) {
+          return requestSub2ApiJson(getSub2ApiAdminUrl(`/admin/accounts/${encodeURIComponent(accountId)}`), {
+            method: "DELETE",
+          });
+        }
+
         function setServerAccountActionBusy(isBusy) {
           [
             elements.refreshServerAccounts,
@@ -3122,6 +3138,7 @@
             elements.stopSelectedServerAccountSchedule,
             elements.enableSelectedServerAccounts,
             elements.disableSelectedServerAccounts,
+            elements.deleteSelectedServerAccounts,
           ].forEach((button) => {
             const elementId = button.id || String(button.selector || "").replace(/^#/, "");
             const isSelectionUtility = elementId === "toggle-visible-server-account-selection";
@@ -3151,10 +3168,14 @@
             "stop-schedule": "关闭调度",
             "enable-account": "启用账号",
             "disable-account": "禁用账号",
+            "delete-account": "删除账号",
           };
           let label = operationLabels[operation] || "操作";
-          if (["start-schedule", "stop-schedule", "enable-account", "disable-account"].includes(operation) && typeof window.confirm === "function") {
-            const ok = window.confirm(`${label} ${ids.length} 个账号？`);
+          if (["start-schedule", "stop-schedule", "enable-account", "disable-account", "delete-account"].includes(operation) && typeof window.confirm === "function") {
+            const confirmText = operation === "delete-account"
+              ? `${label} ${ids.length} 个账号？此操作不可恢复。`
+              : `${label} ${ids.length} 个账号？`;
+            const ok = window.confirm(confirmText);
             if (!ok) {
               return;
             }
@@ -3164,6 +3185,7 @@
           let success = 0;
           let failed = 0;
           let skipped = 0;
+          const successfulIds = [];
           setStatus(elements.serverAccountStatus, `正在${label} ${ids.length} 个账号...`, "ok");
 
           for (const id of ids) {
@@ -3188,15 +3210,22 @@
               } else if (operation === "disable-account") {
                 await setSub2ApiAccountSchedulable(id, false);
                 await updateServerAccount(id, { status: "inactive", confirm_mixed_channel_risk: true });
+              } else if (operation === "delete-account") {
+                await deleteServerAccount(id);
               } else {
                 throw new Error("未知操作");
               }
               success += 1;
+              successfulIds.push(id);
             } catch {
               failed += 1;
             }
           }
 
+          if (operation === "delete-account" && successfulIds.length > 0) {
+            const deletedIds = new Set(successfulIds);
+            state.selectedServerAccountIds = state.selectedServerAccountIds.filter((id) => !deletedIds.has(id));
+          }
           const skippedText = skipped ? `，跳过 ${skipped}` : "";
           setStatus(elements.serverAccountStatus, `${label}完成：成功 ${success}${skippedText}，失败 ${failed}。正在刷新列表...`, failed ? "error" : "ok");
           try {
@@ -3595,6 +3624,9 @@
         });
         elements.disableSelectedServerAccounts.addEventListener("click", () => {
           runServerAccountOperation(state.selectedServerAccountIds, "disable-account");
+        });
+        elements.deleteSelectedServerAccounts.addEventListener("click", () => {
+          runServerAccountOperation(state.selectedServerAccountIds, "delete-account");
         });
         elements.serverAccountBody.addEventListener("change", (event) => {
           const accountId = event.target?.dataset?.serverAccountId;

@@ -216,6 +216,18 @@ function createSub2ApiBrowserDefaultUrl(env = process.env) {
   return createSub2ApiBrowserDefaults(env).defaultUrl;
 }
 
+function defaultEnvFilePath(env = process.env) {
+  if (env.TOKENMANAGER_ENV_FILE) {
+    return env.TOKENMANAGER_ENV_FILE;
+  }
+  const candidates = [
+    path.join(process.cwd(), "server", ".env"),
+    path.join(process.cwd(), ".env"),
+    path.join(__dirname, ".env"),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+}
+
 function databaseFileFromEnv(env = process.env) {
   const explicit = String(env.TOKENMANAGER_DATABASE_FILE || env.TOKENMANAGER_DB_FILE || "").trim();
   if (explicit) {
@@ -300,6 +312,7 @@ function createConfig(env = process.env) {
     cookiePath: env.TOKENMANAGER_COOKIE_PATH || "/",
     appBasePath: normalizePublicPath(env.TOKENMANAGER_BASE_PATH || DEFAULT_APP_BASE_PATH, DEFAULT_APP_BASE_PATH).replace(/\/+$/, "") || DEFAULT_APP_BASE_PATH,
     staticDir: path.resolve(env.TOKENMANAGER_STATIC_DIR || path.join(__dirname, "..", "docs")),
+    envFile: path.resolve(defaultEnvFilePath(env)),
     storageBackend: String(env.TOKENMANAGER_STORAGE_BACKEND || "sqlite").trim().toLowerCase(),
     databaseFile: path.resolve(databaseFileFromEnv(env)),
     encryptionKey: String(env.TOKENMANAGER_ENCRYPTION_KEY || env.TOKENMANAGER_SESSION_SECRET || ""),
@@ -1137,6 +1150,28 @@ async function handleAuth(req, res, parsedUrl, context) {
     jsonResponse(res, 200, buildPublicConfig(config, runtimeConfigStore.read()), {
       "Cache-Control": "no-store",
     });
+    return;
+  }
+
+  if (pathname === "/token-manager-auth/password") {
+    if (req.method !== "POST") return methodNotAllowed(res);
+    const session = sessions.fromRequest(req);
+    if (!session) {
+      jsonResponse(res, 401, { error: "not_authenticated" });
+      return;
+    }
+    assertStateChangingRequestIsSameOrigin(req);
+    const payload = await readJsonBody(req, config.maxBodyBytes);
+    const password = String(payload.new_password || payload.password || "");
+    if (password.length < 8) {
+      jsonResponse(res, 400, { error: "password_too_short" });
+      return;
+    }
+    const encoded = await hashPassword(password);
+    writeEnvFileValue(config.envFile, "TOKENMANAGER_PASSWORD_HASH", encoded);
+    config.loginPasswordHash = encoded;
+    config.loginPassword = "";
+    jsonResponse(res, 200, { ok: true, updated: true });
     return;
   }
 

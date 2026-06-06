@@ -58,6 +58,7 @@ async function startBff(configOverrides = {}, sub2apiBaseUrl) {
     storageBackend: "sqlite",
     databaseFile: path.join(tempDir, "tokenmanager.sqlite"),
     encryptionKey: "test-session-secret-that-is-long-enough-12345",
+    envFile: path.join(tempDir, ".env"),
     pythonBin: "python3",
     runtimeConfigFile: path.join(tempDir, "runtime-config.json"),
     ...configOverrides,
@@ -321,6 +322,59 @@ test("login sets an HttpOnly cookie without returning any bearer token", async (
     assert.match(setCookie, /HttpOnly/);
     assert.match(setCookie, /Secure/);
     assert.match(setCookie, /SameSite=Lax/);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("authenticated user can update TokenManager login password without manual hash editing", async () => {
+  const mock = await startMockSub2Api((_req, res) => res.writeHead(404).end());
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokenmanager-password-"));
+  const envFile = path.join(tempDir, ".env");
+  fs.writeFileSync(envFile, "TOKENMANAGER_SESSION_SECRET=test-session-secret-that-is-long-enough-12345\nTOKENMANAGER_PASSWORD_HASH=old\n");
+  const bff = await startBff({ authOnly: true, envFile, sub2apiAdminEmail: "", sub2apiAdminPassword: "" }, mock.baseUrl);
+
+  try {
+    const login = await fetchJson(`${bff.baseUrl}/token-manager/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const tooShort = await fetchJson(`${bff.baseUrl}/token-manager/auth/password`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ new_password: "short" }),
+    });
+    assert.equal(tooShort.response.status, 400);
+
+    const changed = await fetchJson(`${bff.baseUrl}/token-manager/auth/password`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ new_password: "new-tokenmanager-password" }),
+    });
+    assert.equal(changed.response.status, 200);
+    assert.equal(changed.body.ok, true);
+    const envText = fs.readFileSync(envFile, "utf8");
+    assert.match(envText, /^TOKENMANAGER_PASSWORD_HASH=scrypt:v1:/m);
+    assert.doesNotMatch(envText, /new-tokenmanager-password/);
+
+    const oldLogin = await fetchJson(`${bff.baseUrl}/token-manager/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    assert.equal(oldLogin.response.status, 401);
+
+    const newLogin = await fetchJson(`${bff.baseUrl}/token-manager/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "new-tokenmanager-password" }),
+    });
+    assert.equal(newLogin.response.status, 200);
   } finally {
     await bff.close();
     await mock.close();

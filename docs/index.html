@@ -1023,6 +1023,33 @@
 
         </div>
       </section>
+
+      <section class="panel" id="tokenmanager-settings" aria-labelledby="tokenmanager-settings-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="tokenmanager-settings-title">TokenManager 设置</h2>
+            <p>修改页面登录密码；系统会自动保存为哈希，不需要 SSH 生成或复制。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="import-config" aria-label="TokenManager 登录设置">
+            <div class="import-config-grid">
+              <div class="config-field">
+                <label for="tokenmanager-new-password">新的登录密码</label>
+                <input id="tokenmanager-new-password" type="password" placeholder="至少 8 位" autocomplete="new-password" />
+              </div>
+              <div class="config-field">
+                <label for="tokenmanager-confirm-password">确认新密码</label>
+                <input id="tokenmanager-confirm-password" type="password" placeholder="再次输入新密码" autocomplete="new-password" />
+              </div>
+            </div>
+            <div class="actions" style="margin-top: 10px; justify-content: flex-start;">
+              <button class="button button-primary" id="save-tokenmanager-password" type="button">保存登录密码</button>
+            </div>
+            <div class="status-line" id="tokenmanager-password-status">修改后立即生效；当前已登录会话会继续保留。</div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <script>
@@ -1072,6 +1099,7 @@
           refreshServerAccounts: document.querySelector("#refresh-server-accounts"),
           serverAccountBody: document.querySelector("#server-account-body"),
           saveSub2apiConfig: document.querySelector("#save-sub2api-config"),
+          saveTokenmanagerPassword: document.querySelector("#save-tokenmanager-password"),
           serverAccountStatus: document.querySelector("#server-account-status"),
           sub2apiBrowserConfig: document.querySelector("#sub2api-browser-config"),
           sub2apiConfigHint: document.querySelector("#sub2api-config-hint"),
@@ -1088,6 +1116,9 @@
           proxy: document.querySelector("#sub2api-proxy"),
           priority: document.querySelector("#sub2api-priority"),
           rateMultiplier: document.querySelector("#sub2api-rate-multiplier"),
+          tokenmanagerPassword: document.querySelector("#tokenmanager-new-password"),
+          tokenmanagerPasswordConfirm: document.querySelector("#tokenmanager-confirm-password"),
+          tokenmanagerPasswordStatus: document.querySelector("#tokenmanager-password-status"),
         };
 
         const exampleSession = {
@@ -2261,6 +2292,52 @@
           }
         }
 
+        async function saveTokenManagerPassword() {
+          if (!canLoadServerDefaults()) {
+            setStatus(elements.tokenmanagerPasswordStatus, "本地静态页面无法修改服务器登录密码。", "error");
+            return;
+          }
+
+          const password = String(elements.tokenmanagerPassword.value || "");
+          const confirm = String(elements.tokenmanagerPasswordConfirm.value || "");
+          if (password.length < 8) {
+            setStatus(elements.tokenmanagerPasswordStatus, "新密码至少需要 8 位。", "error");
+            return;
+          }
+          if (password !== confirm) {
+            setStatus(elements.tokenmanagerPasswordStatus, "两次输入的新密码不一致。", "error");
+            return;
+          }
+
+          elements.saveTokenmanagerPassword.disabled = true;
+          const originalText = elements.saveTokenmanagerPassword.textContent;
+          elements.saveTokenmanagerPassword.textContent = "保存中...";
+
+          try {
+            const response = await fetch("/token-manager/auth/password", {
+              method: "POST",
+              cache: "no-store",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ new_password: password }),
+            });
+            const payload = await readJsonResponse(response);
+            if (!response.ok) {
+              throw new Error(getErrorMessageFromResponseBody(payload, `HTTP ${response.status}`));
+            }
+            elements.tokenmanagerPassword.value = "";
+            elements.tokenmanagerPasswordConfirm.value = "";
+            setStatus(elements.tokenmanagerPasswordStatus, "登录密码已更新；下次登录请使用新密码。", "ok");
+          } catch (error) {
+            setStatus(elements.tokenmanagerPasswordStatus, error instanceof Error ? error.message : "保存登录密码失败。", "error");
+          } finally {
+            elements.saveTokenmanagerPassword.disabled = false;
+            elements.saveTokenmanagerPassword.textContent = originalText;
+          }
+        }
+
         function buildUrlWithQuery(url, params) {
           const query = Object.entries(params)
             .filter(([, value]) => value !== undefined && value !== null && value !== "")
@@ -2622,6 +2699,7 @@
         elements.fetchSub2apiMeta.addEventListener("click", fetchSub2ApiMeta);
         elements.refreshServerAccounts.addEventListener("click", refreshServerAccounts);
         elements.saveSub2apiConfig.addEventListener("click", saveSub2ApiConfig);
+        elements.saveTokenmanagerPassword.addEventListener("click", saveTokenManagerPassword);
         elements.sub2apiTokenToggle.addEventListener("click", () => {
           const isVisible = elements.sub2apiToken.type === "text";
           elements.sub2apiToken.type = isVisible ? "password" : "text";

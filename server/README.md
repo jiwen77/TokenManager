@@ -119,7 +119,9 @@ TOKENMANAGER_DATABASE_FILE=/opt/tokenmanager/data/tokenmanager.sqlite
 TOKENMANAGER_ENCRYPTION_KEY=<至少32字节随机字符串>
 ```
 
-修改 TokenManager 页面登录密码（自动生成哈希并写入 `.env`，避免手动复制）：
+修改 TokenManager 页面登录密码的首选方式：登录网页后，在“TokenManager 设置”里直接填写新密码并保存。后端会自动生成哈希并写入 `.env`，不保存明文，也不需要 SSH。
+
+如果无法登录页面，可用 SSH 备用命令：
 
 ```bash
 printf '%s' '你的新登录密码' | node server/tokenmanager-bff.js set-login-password --env /opt/tokenmanager/server/.env

@@ -276,6 +276,8 @@ function buildPublicConfig(config, runtimeConfig = {}) {
     proxy_id: runtimeConfig.proxyId ?? null,
     priority: normalizeFiniteNumber(runtimeConfig.priority, 1),
     rate_multiplier: normalizeFiniteNumber(runtimeConfig.rateMultiplier, 1),
+    websocket_mode: runtimeConfig.websocketMode || "off",
+    auto_passthrough: runtimeConfig.autoPassthrough === true,
     updated_at: runtimeConfig.updatedAt,
   };
 }

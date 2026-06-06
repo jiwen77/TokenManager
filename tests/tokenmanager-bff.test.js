@@ -414,6 +414,8 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
         proxy_id: 7,
         priority: 3,
         rate_multiplier: 1.5,
+        websocket_mode: "passthrough",
+        auto_passthrough: true,
       }),
     });
     assert.equal(saved.response.status, 200);
@@ -423,6 +425,8 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     assert.equal(saved.body.proxy_id, 7);
     assert.equal(saved.body.priority, 3);
     assert.equal(saved.body.rate_multiplier, 1.5);
+    assert.equal(saved.body.websocket_mode, "passthrough");
+    assert.equal(saved.body.auto_passthrough, true);
     assert.equal(saved.body.sub2api_bearer_token, undefined);
 
     const store = new RuntimeConfigStore({
@@ -434,6 +438,8 @@ test("config save persists server-side sub2api settings and proxy uses saved bea
     const persisted = store.read();
     assert.equal(persisted.sub2apiOrigin, mockOrigin);
     assert.equal(persisted.sub2apiBearerToken, "runtime-bearer-token");
+    assert.equal(persisted.websocketMode, "passthrough");
+    assert.equal(persisted.autoPassthrough, true);
     const rawDatabase = fs.readFileSync(databaseFile);
     assert.equal(rawDatabase.includes(Buffer.from("runtime-bearer-token")), false);
 
@@ -463,6 +469,8 @@ test("sqlite runtime config migrates legacy JSON and encrypts bearer token", () 
     proxyId: 7,
     priority: 3,
     rateMultiplier: 1.5,
+    websocketMode: "ctx_pool",
+    autoPassthrough: true,
   }));
 
   const store = new RuntimeConfigStore({
@@ -480,6 +488,8 @@ test("sqlite runtime config migrates legacy JSON and encrypts bearer token", () 
   assert.equal(migrated.proxyId, 7);
   assert.equal(migrated.priority, 3);
   assert.equal(migrated.rateMultiplier, 1.5);
+  assert.equal(migrated.websocketMode, "ctx_pool");
+  assert.equal(migrated.autoPassthrough, true);
   assert.equal(fs.readFileSync(databaseFile).includes(Buffer.from("legacy-secret-token")), false);
 });
 

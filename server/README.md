@@ -63,6 +63,8 @@ TOKENMANAGER_PYTHON=/usr/bin/python3
 - 绑定代理
 - Priority
 - Rate Multiplier
+- WS mode（写入 `extra.openai_oauth_responses_websockets_v2_mode`）
+- 自动透传（写入 `extra.openai_passthrough`）
 
 保存后的 Bearer Token 不会通过 `/token-manager/auth/config` 明文返回给页面；页面只会知道服务器端已有认证。SQLite 文件里也不会保存 Bearer Token 明文。
 

@@ -527,6 +527,8 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
           proxy_id: 7,
           priority: 3,
           rate_multiplier: 1.5,
+          websocket_mode: "passthrough",
+          auto_passthrough: true,
         }),
       };
     },
@@ -547,6 +549,8 @@ async function testServerDefaultSub2apiUrlHydratesInput() {
   assert.equal(elements.get("#sub2api-proxy").value, "7");
   assert.equal(elements.get("#sub2api-priority").value, "3");
   assert.equal(elements.get("#sub2api-rate-multiplier").value, "1.5");
+  assert.equal(elements.get("#sub2api-websocket-mode").value, "passthrough");
+  assert.equal(elements.get("#sub2api-auto-passthrough").checked, true);
 }
 
 async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
@@ -691,6 +695,8 @@ async function testSaveSub2apiConfigPostsServerSettings() {
             proxy_id: 7,
             priority: 3,
             rate_multiplier: 1.5,
+            websocket_mode: "ctx_pool",
+            auto_passthrough: true,
           }),
         };
       }
@@ -721,6 +727,10 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   dispatch(elements.get("#sub2api-priority"), "input");
   elements.get("#sub2api-rate-multiplier").value = "1.5";
   dispatch(elements.get("#sub2api-rate-multiplier"), "input");
+  elements.get("#sub2api-websocket-mode").value = "ctx_pool";
+  dispatch(elements.get("#sub2api-websocket-mode"), "change");
+  elements.get("#sub2api-auto-passthrough").checked = true;
+  dispatch(elements.get("#sub2api-auto-passthrough"), "change");
   dispatch(elements.get("#save-sub2api-config"), "click");
 
   await new Promise((resolve) => setImmediate(resolve));
@@ -732,6 +742,8 @@ async function testSaveSub2apiConfigPostsServerSettings() {
   assert.equal(capturedPosts[0].proxy_id, 7);
   assert.equal(capturedPosts[0].priority, 3);
   assert.equal(capturedPosts[0].rate_multiplier, 1.5);
+  assert.equal(capturedPosts[0].websocket_mode, "ctx_pool");
+  assert.equal(capturedPosts[0].auto_passthrough, true);
   assert.equal(elements.get("#sub2api-token").value, "");
   assert.match(elements.get("#output-status").textContent, /配置已保存到服务器/);
 }
@@ -784,6 +796,10 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
 
   sub2apiUrl.value = "https://sub2api.example.com/api/v1/admin/accounts/data";
   sub2apiToken.value = "test-token";
+  elements.get("#sub2api-websocket-mode").value = "passthrough";
+  dispatch(elements.get("#sub2api-websocket-mode"), "change");
+  elements.get("#sub2api-auto-passthrough").checked = true;
+  dispatch(elements.get("#sub2api-auto-passthrough"), "change");
 
   input.value = JSON.stringify({
     user: {
@@ -809,6 +825,9 @@ async function testImportToSub2ApiPostsCurrentSub2apiPayload() {
   assert.equal(body.data.accounts[0].platform, "openai");
   assert.equal(body.data.accounts[0].type, "oauth");
   assert.equal(body.data.accounts[0].credentials.access_token, accessToken);
+  assert.equal(body.data.accounts[0].extra.openai_oauth_responses_websockets_v2_enabled, true);
+  assert.equal(body.data.accounts[0].extra.openai_oauth_responses_websockets_v2_mode, "passthrough");
+  assert.equal(body.data.accounts[0].extra.openai_passthrough, true);
   assert.match(outputStatus.textContent, /已导入 sub2api/);
   assert.ok(
     capturedRequests.some((request) => String(request.url).startsWith("https://sub2api.example.com/api/v1/admin/accounts?")),

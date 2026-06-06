@@ -558,10 +558,48 @@
         background: var(--surface-soft);
       }
 
+      .config-section {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+
+      .config-section-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .config-section-title {
+        margin: 0;
+        font-size: 0.92rem;
+        font-weight: 900;
+        color: var(--accent-strong);
+      }
+
+      .config-section-help {
+        margin: 3px 0 0;
+        color: var(--muted);
+        font-size: 0.8rem;
+        line-height: 1.45;
+      }
+
       .import-config-grid {
         display: grid;
         grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
         gap: 10px;
+      }
+
+      .import-config-grid.is-balanced {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .import-config-grid.is-three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
       .config-field {
@@ -586,10 +624,55 @@
         color: var(--text);
       }
 
+      .config-field select[multiple] {
+        min-height: 112px;
+        padding: 6px;
+      }
+
       .config-field input:focus,
       .config-field select:focus {
         outline: 2px solid rgba(36, 80, 90, 0.22);
         border-color: var(--accent);
+      }
+
+      .field-help {
+        color: var(--muted);
+        font-size: 0.76rem;
+        line-height: 1.35;
+      }
+
+      .switch-card {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        min-height: 54px;
+        padding: 10px 11px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface-soft);
+        cursor: pointer;
+      }
+
+      .switch-card input {
+        width: 18px;
+        min-height: 18px;
+        margin: 2px 0 0;
+        accent-color: var(--accent);
+      }
+
+      .switch-card-title {
+        display: block;
+        font-size: 0.84rem;
+        font-weight: 900;
+        color: var(--accent-strong);
+      }
+
+      .switch-card-help {
+        display: block;
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 0.76rem;
+        line-height: 1.35;
       }
 
       .secret-field {
@@ -727,6 +810,12 @@
 
         .toolbar {
           display: block;
+        }
+
+        .import-config-grid,
+        .import-config-grid.is-balanced,
+        .import-config-grid.is-three {
+          grid-template-columns: 1fr;
         }
 
         .segmented {
@@ -935,57 +1024,104 @@
         </div>
         <div class="panel-body">
             <div class="import-config" aria-label="sub2api 导入配置">
-              <div class="import-config-grid" id="sub2api-browser-config">
-                <div class="config-field">
-                  <label for="sub2api-url">sub2api 服务器地址</label>
-                  <input id="sub2api-url" type="text" placeholder="https://api.example.com 或 ip:端口" spellcheck="false" />
-                </div>
-                <div class="config-field">
-                  <label for="sub2api-token">Bearer Token</label>
-                  <div class="secret-field">
-                    <input id="sub2api-token" type="password" placeholder="请输入 sub2api 的 Bearer 令牌" spellcheck="false" autocomplete="off" />
-                    <button class="secret-toggle" id="toggle-sub2api-token" type="button" aria-label="显示 Bearer Token" aria-pressed="false" title="显示 Bearer Token">
-                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <path fill="currentColor" d="M12 5c5.5 0 9.7 4.7 10.8 6.2.3.5.3 1.1 0 1.6C21.7 14.3 17.5 19 12 19S2.3 14.3 1.2 12.8a1.4 1.4 0 0 1 0-1.6C2.3 9.7 6.5 5 12 5Zm0 2c-4.3 0-7.8 3.5-8.9 5 1.1 1.5 4.6 5 8.9 5s7.8-3.5 8.9-5C19.8 10.5 16.3 7 12 7Zm0 2.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z" />
-                      </svg>
-                    </button>
+              <section class="config-section" id="sub2api-browser-config" aria-label="sub2api 连接与认证">
+                <div class="config-section-head">
+                  <div>
+                    <h3 class="config-section-title">连接与认证</h3>
+                    <p class="config-section-help">只填域名、IP:端口或 base URL；后端 API 路径会自动补齐。</p>
                   </div>
                 </div>
-              </div>
-
-              <div class="import-config-grid" style="margin-top: 10px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);">
-                <div class="config-field">
-                  <label for="sub2api-groups">绑定分组 (多选: 按住 Ctrl/Cmd)</label>
-                  <select id="sub2api-groups" multiple style="width: 100%; min-height: 85px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 0.84rem; color: var(--text);">
-                    <option value="">(请先同步 sub2api 数据)</option>
-                  </select>
+                <div class="import-config-grid">
+                  <div class="config-field">
+                    <label for="sub2api-url">sub2api 服务器地址</label>
+                    <input id="sub2api-url" type="text" placeholder="https://api.example.com 或 127.0.0.1:8080" spellcheck="false" />
+                    <span class="field-help">服务器代理模式下，浏览器不会直接访问这个地址。</span>
+                  </div>
+                  <div class="config-field">
+                    <label for="sub2api-token">Bearer Token</label>
+                    <div class="secret-field">
+                      <input id="sub2api-token" type="password" placeholder="留空保存不会覆盖已有认证" spellcheck="false" autocomplete="off" />
+                      <button class="secret-toggle" id="toggle-sub2api-token" type="button" aria-label="显示 Bearer Token" aria-pressed="false" title="显示 Bearer Token">
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path fill="currentColor" d="M12 5c5.5 0 9.7 4.7 10.8 6.2.3.5.3 1.1 0 1.6C21.7 14.3 17.5 19 12 19S2.3 14.3 1.2 12.8a1.4 1.4 0 0 1 0-1.6C2.3 9.7 6.5 5 12 5Zm0 2c-4.3 0-7.8 3.5-8.9 5 1.1 1.5 4.6 5 8.9 5s7.8-3.5 8.9-5C19.8 10.5 16.3 7 12 7Zm0 2.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z" />
+                        </svg>
+                      </button>
+                    </div>
+                    <span class="field-help">保存后不会明文回显。</span>
+                  </div>
                 </div>
-                <div class="config-field" style="display: flex; flex-direction: column; justify-content: space-between;">
+              </section>
+
+              <section class="config-section" aria-label="sub2api 绑定设置">
+                <div class="config-section-head">
                   <div>
-                    <label for="sub2api-proxy">绑定代理 (单选)</label>
-                    <select id="sub2api-proxy" style="width: 100%; min-height: 38px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 0.84rem; color: var(--text);">
+                    <h3 class="config-section-title">绑定设置</h3>
+                    <p class="config-section-help">先同步元数据，再选择导入账号要绑定的分组和代理。</p>
+                  </div>
+                  <button class="button button-secondary" id="fetch-sub2api-meta" type="button">同步分组/代理</button>
+                </div>
+                <div class="import-config-grid is-balanced">
+                  <div class="config-field">
+                    <label for="sub2api-groups">绑定分组</label>
+                    <select id="sub2api-groups" multiple>
+                      <option value="">(请先同步 sub2api 数据)</option>
+                    </select>
+                    <span class="field-help">可多选；按住 Ctrl/Cmd 选择多个分组。</span>
+                  </div>
+                  <div class="config-field">
+                    <label for="sub2api-proxy">绑定代理</label>
+                    <select id="sub2api-proxy">
                       <option value="">不使用代理 / 默认</option>
                     </select>
+                    <span class="field-help">只绑定一个代理；留空则使用 sub2api 默认策略。</span>
                   </div>
-                  <button class="button button-secondary" id="fetch-sub2api-meta" type="button" style="min-height: 34px; font-size: 0.82rem; margin-top: 8px; font-weight: 800; border-color: var(--line-strong);">同步分组与代理元数据</button>
                 </div>
-              </div>
+              </section>
 
-              <div class="import-config-grid" style="margin-top: 10px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);">
-                <div class="config-field">
-                  <label for="sub2api-priority">并发限制与优先级 (Priority)</label>
-                  <input id="sub2api-priority" type="number" value="1" min="0" spellcheck="false" style="width: 100%; min-height: 38px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text);" />
+              <section class="config-section" aria-label="sub2api 导入行为">
+                <div class="config-section-head">
+                  <div>
+                    <h3 class="config-section-title">导入行为</h3>
+                    <p class="config-section-help">这些值会写入导入账号的 sub2api 字段，并可保存为下次默认值。</p>
+                  </div>
                 </div>
-                <div class="config-field">
-                  <label for="sub2api-rate-multiplier">计费倍率 (Rate Multiplier)</label>
-                  <input id="sub2api-rate-multiplier" type="number" value="1.0" step="0.1" min="0" spellcheck="false" style="width: 100%; min-height: 38px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text);" />
+                <div class="import-config-grid is-three">
+                  <div class="config-field">
+                    <label for="sub2api-priority">Priority</label>
+                    <input id="sub2api-priority" type="number" value="1" min="0" spellcheck="false" />
+                    <span class="field-help">数值越小通常越优先。</span>
+                  </div>
+                  <div class="config-field">
+                    <label for="sub2api-rate-multiplier">计费倍率</label>
+                    <input id="sub2api-rate-multiplier" type="number" value="1.0" step="0.1" min="0" spellcheck="false" />
+                    <span class="field-help">写入 rate_multiplier。</span>
+                  </div>
+                  <div class="config-field">
+                    <label for="sub2api-websocket-mode">WS mode</label>
+                    <select id="sub2api-websocket-mode">
+                      <option value="off">关闭</option>
+                      <option value="ctx_pool">ctx_pool</option>
+                      <option value="passthrough">passthrough</option>
+                    </select>
+                    <span class="field-help">写入 OpenAI OAuth WebSocket v2 mode。</span>
+                  </div>
                 </div>
-              </div>
+                <div class="import-config-grid is-balanced">
+                  <label class="switch-card" for="sub2api-auto-passthrough">
+                    <input id="sub2api-auto-passthrough" type="checkbox" />
+                    <span>
+                      <span class="switch-card-title">自动透传</span>
+                      <span class="switch-card-help">开启后写入 extra.openai_passthrough，适合让 sub2api 对支持的模型走自动透传分支。</span>
+                    </span>
+                  </label>
+                  <div class="config-hint" id="sub2api-config-hint">服务器代理模式已启用时，保存的配置会持久化在服务器；导入请求由 TokenManager 发起。</div>
+                </div>
+              </section>
 
-              <div class="actions" style="margin-top: 10px; justify-content: flex-start;">
+              <div class="actions" style="justify-content: flex-start;">
                 <button class="button button-primary" id="save-sub2api-config" type="button">保存配置</button>
+                <button class="button button-secondary" id="refresh-server-accounts-inline" type="button">刷新服务器账号</button>
               </div>
-              <div class="config-hint" id="sub2api-config-hint" style="margin-top: 10px;">只需填写 sub2api 的服务器地址（域名或 ip:端口）；完整导入路径由服务器 .env 自动补齐。HTTPS 页面里使用 HTTP 地址可能被浏览器拦截。</div>
             </div>
             <section class="server-accounts-card" aria-labelledby="server-accounts-title">
               <div class="server-accounts-head">
@@ -1076,7 +1212,9 @@
           serverAccountTotal: 0,
           selectedGroups: [],
           selectedProxy: null,
-          sub2apiProxyEnabled: false
+          sub2apiProxyEnabled: false,
+          websocketMode: "off",
+          autoPassthrough: false
         };
 
         const elements = {
@@ -1097,6 +1235,7 @@
           outputSubtitle: document.querySelector("#output-subtitle"),
           pickFiles: document.querySelector("#pick-files"),
           refreshServerAccounts: document.querySelector("#refresh-server-accounts"),
+          refreshServerAccountsInline: document.querySelector("#refresh-server-accounts-inline"),
           serverAccountBody: document.querySelector("#server-account-body"),
           saveSub2apiConfig: document.querySelector("#save-sub2api-config"),
           saveTokenmanagerPassword: document.querySelector("#save-tokenmanager-password"),
@@ -1116,6 +1255,8 @@
           proxy: document.querySelector("#sub2api-proxy"),
           priority: document.querySelector("#sub2api-priority"),
           rateMultiplier: document.querySelector("#sub2api-rate-multiplier"),
+          websocketMode: document.querySelector("#sub2api-websocket-mode"),
+          autoPassthrough: document.querySelector("#sub2api-auto-passthrough"),
           tokenmanagerPassword: document.querySelector("#tokenmanager-new-password"),
           tokenmanagerPasswordConfirm: document.querySelector("#tokenmanager-confirm-password"),
           tokenmanagerPasswordStatus: document.querySelector("#tokenmanager-password-status"),
@@ -1640,7 +1781,7 @@
             account_note: firstNonEmpty(record.account_note, record.accountInfo, record.account_info, record.note, record.notes, record.remark),
           };
 
-          // 核心修改：将页面侧选中的 group_ids, proxy_id, priority, rate_multiplier 载入 sub2api 导入结构中
+          // 将页面侧配置写入 sub2api 导入结构中。
           const sub2apiAccount = stripUnavailable({
             name: firstNonEmpty(name, email, sourceName, "ChatGPT Account"),
             platform: "openai",
@@ -1668,6 +1809,9 @@
               auth_provider: firstNonEmpty(record.authProvider, record.auth_provider),
               source: sourceType,
               last_refresh: exportedAt,
+              openai_oauth_responses_websockets_v2_enabled: state.websocketMode !== "off",
+              openai_oauth_responses_websockets_v2_mode: state.websocketMode,
+              openai_passthrough: state.autoPassthrough,
             },
           });
           const priority = Number.isFinite(Number(record.priority)) ? Number(record.priority) : 9;
@@ -2188,6 +2332,11 @@
             state.rateMultiplier = Number(payload.rate_multiplier);
             elements.rateMultiplier.value = String(state.rateMultiplier);
           }
+          const websocketMode = String(payload.websocket_mode || payload.websocketMode || "off");
+          state.websocketMode = ["off", "ctx_pool", "passthrough"].includes(websocketMode) ? websocketMode : "off";
+          elements.websocketMode.value = state.websocketMode;
+          state.autoPassthrough = payload.auto_passthrough === true || payload.autoPassthrough === true;
+          elements.autoPassthrough.checked = state.autoPassthrough;
           if (payload.sub2api_has_bearer_token || payload.sub2api_server_auth_configured) {
             elements.sub2apiToken.placeholder = "服务器已保存认证；留空保存不会覆盖";
           }
@@ -2275,6 +2424,8 @@
                 proxy_id: state.selectedProxy,
                 priority: state.priority,
                 rate_multiplier: state.rateMultiplier,
+                websocket_mode: state.websocketMode,
+                auto_passthrough: state.autoPassthrough,
               }),
             });
             const payload = await readJsonResponse(response);
@@ -2678,6 +2829,16 @@
           scheduleConvert();
         });
 
+        elements.websocketMode.addEventListener("change", () => {
+          state.websocketMode = elements.websocketMode.value || "off";
+          scheduleConvert();
+        });
+
+        elements.autoPassthrough.addEventListener("change", () => {
+          state.autoPassthrough = elements.autoPassthrough.checked === true;
+          scheduleConvert();
+        });
+
         elements.groups.addEventListener("change", () => {
           state.selectedGroups = Array.from(elements.groups.selectedOptions)
             .map(o => o.value)
@@ -2698,6 +2859,7 @@
 
         elements.fetchSub2apiMeta.addEventListener("click", fetchSub2ApiMeta);
         elements.refreshServerAccounts.addEventListener("click", refreshServerAccounts);
+        elements.refreshServerAccountsInline.addEventListener("click", refreshServerAccounts);
         elements.saveSub2apiConfig.addEventListener("click", saveSub2ApiConfig);
         elements.saveTokenmanagerPassword.addEventListener("click", saveTokenManagerPassword);
         elements.sub2apiTokenToggle.addEventListener("click", () => {

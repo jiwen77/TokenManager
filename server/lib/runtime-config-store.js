@@ -38,6 +38,21 @@ function normalizeFiniteNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function normalizeSub2ApiWebsocketMode(value, fallback = "off") {
+  const normalized = String(value || fallback || "off").trim().toLowerCase();
+  return ["off", "ctx_pool", "passthrough"].includes(normalized) ? normalized : fallback;
+}
+
+function normalizeBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
 function isLocalOrPrivateHost(hostname) {
   const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host === "::1" || host === "0.0.0.0") {
@@ -117,6 +132,14 @@ function sanitizeRuntimeConfig(value = {}, current = {}) {
 
   if (Object.prototype.hasOwnProperty.call(value, "rate_multiplier") || Object.prototype.hasOwnProperty.call(value, "rateMultiplier")) {
     next.rateMultiplier = normalizeFiniteNumber(value.rate_multiplier ?? value.rateMultiplier, current.rateMultiplier ?? 1);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "websocket_mode") || Object.prototype.hasOwnProperty.call(value, "websocketMode") || Object.prototype.hasOwnProperty.call(value, "ws_mode") || Object.prototype.hasOwnProperty.call(value, "wsMode")) {
+    next.websocketMode = normalizeSub2ApiWebsocketMode(value.websocket_mode ?? value.websocketMode ?? value.ws_mode ?? value.wsMode, current.websocketMode ?? "off");
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "auto_passthrough") || Object.prototype.hasOwnProperty.call(value, "autoPassthrough")) {
+    next.autoPassthrough = normalizeBoolean(value.auto_passthrough ?? value.autoPassthrough, current.autoPassthrough ?? false);
   }
 
   next.updatedAt = new Date().toISOString();
@@ -400,6 +423,7 @@ module.exports = {
   decryptSecret,
   encryptSecret,
   normalizeFiniteNumber,
+  normalizeSub2ApiWebsocketMode,
   normalizeSub2ApiGroupIds,
   normalizeSub2ApiOrigin,
   normalizeSub2ApiSelectionId,

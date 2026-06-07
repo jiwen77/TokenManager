@@ -7,6 +7,8 @@ It can run as either:
 - a static browser page for local conversion previews; or
 - a small Backend-for-Frontend (BFF) that protects sub2api admin credentials behind an HttpOnly TokenManager session and a same-origin proxy.
 
+This fork line mainly focuses on sub2api management improvements: safer BFF-backed admin operations, bulk account controls, group/proxy binding, scheduling and privacy workflows, and clearer deployment guidance.
+
 > Security notice: session exports, OAuth files, Bearer tokens, generated import JSON, runtime databases, and screenshots containing account details are sensitive. Use this project only with accounts and tokens you are authorized to access.
 
 ## Contents

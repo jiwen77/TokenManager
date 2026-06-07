@@ -6,7 +6,7 @@
     <title>ChatGPT Session -> CPA / sub2api / Cockpit / Codex / AxonHub / Codex-Manager</title>
     <meta name="theme-color" content="#24505a" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" sizes="any" />
-    <link rel="stylesheet" href="./styles.css?v=20260607-delete-accounts" />
+    <link rel="stylesheet" href="./styles.css?v=20260607-confirm-dialog" />
 
   </head>
   <body>
@@ -32,15 +32,15 @@
           <button class="meta-chip logout-button" id="logout-button" type="button" hidden>退出登录</button>
           <a
             class="meta-chip github-link"
-            href="https://github.com/jiwen77/TokenManager"
+            href="https://github.com/"
             target="_blank"
             rel="noreferrer"
-            aria-label="本页面代码开源"
+            aria-label="项目开源"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58v-2.24c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.08 1.85 1.24 1.85 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23A11.5 11.5 0 0 1 12 5.78c1.02 0 2.05.14 3.01.41 2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.93.43.37.82 1.1.82 2.22v3.3c0 .32.22.7.83.58A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z" />
             </svg>
-            <span>本页面代码开源</span>
+            <span>项目开源</span>
           </a>
         </div>
       </header>
@@ -338,11 +338,43 @@
               <div class="server-account-actions">
                 <button class="tiny-button server-selection-toggle" id="toggle-visible-server-account-selection" type="button">全选可见</button>
                 <button class="tiny-button server-bulk-action server-bulk-apply" id="apply-selected-server-account-settings" type="button" disabled>应用当前参数</button>
-                <button class="tiny-button server-bulk-action server-bulk-enable" id="enable-selected-server-accounts" type="button" disabled>启用账号</button>
-                <button class="tiny-button server-bulk-action server-bulk-disable" id="disable-selected-server-accounts" type="button" disabled>禁用账号</button>
-                <button class="tiny-button server-bulk-action server-bulk-start" id="start-selected-server-account-schedule" type="button" disabled>启动调度</button>
-                <button class="tiny-button server-bulk-action server-bulk-stop" id="stop-selected-server-account-schedule" type="button" disabled>关闭调度</button>
-                <button class="tiny-button server-bulk-action server-bulk-privacy" id="privacy-selected-server-accounts" type="button" disabled>设置 privacy</button>
+                <details class="server-more-actions" id="server-more-actions" aria-disabled="true">
+                  <summary class="tiny-button server-more-trigger">
+                    <span>更多操作</span>
+                    <span class="server-more-caret" aria-hidden="true">▾</span>
+                  </summary>
+                  <div class="server-more-menu" role="menu" aria-label="更多服务器账号操作">
+                    <div class="server-menu-group" role="group" aria-label="账号状态">
+                      <div class="server-menu-label">账号状态</div>
+                      <button class="tiny-button server-menu-item server-bulk-action server-bulk-enable" id="enable-selected-server-accounts" type="button" disabled>
+                        <span class="server-menu-icon is-success" aria-hidden="true">●</span>
+                        <span>启用账号</span>
+                      </button>
+                      <button class="tiny-button server-menu-item server-bulk-action server-bulk-disable" id="disable-selected-server-accounts" type="button" disabled>
+                        <span class="server-menu-icon is-neutral" aria-hidden="true">○</span>
+                        <span>禁用账号</span>
+                      </button>
+                    </div>
+                    <div class="server-menu-group" role="group" aria-label="调度">
+                      <div class="server-menu-label">调度</div>
+                      <button class="tiny-button server-menu-item server-bulk-action server-bulk-start" id="start-selected-server-account-schedule" type="button" disabled>
+                        <span class="server-menu-icon is-success" aria-hidden="true">▶</span>
+                        <span>启动调度</span>
+                      </button>
+                      <button class="tiny-button server-menu-item server-bulk-action server-bulk-stop" id="stop-selected-server-account-schedule" type="button" disabled>
+                        <span class="server-menu-icon is-warning" aria-hidden="true">⏸</span>
+                        <span>关闭调度</span>
+                      </button>
+                    </div>
+                    <div class="server-menu-group" role="group" aria-label="隐私">
+                      <div class="server-menu-label">隐私</div>
+                      <button class="tiny-button server-menu-item server-bulk-action server-bulk-privacy" id="privacy-selected-server-accounts" type="button" disabled>
+                        <span class="server-menu-icon is-shield" aria-hidden="true">🛡</span>
+                        <span>设置 privacy</span>
+                      </button>
+                    </div>
+                  </div>
+                </details>
                 <button class="tiny-button server-bulk-action server-bulk-delete" id="delete-selected-server-accounts" type="button" disabled><span class="trash-icon" aria-hidden="true">🗑</span>删除账号</button>
               </div>
             </div>
@@ -383,7 +415,19 @@
       </section>
     </main>
 
-    <script src="./app.js?v=20260607-delete-accounts"></script>
+    <div class="confirm-backdrop" id="confirm-dialog" hidden>
+      <section class="confirm-card" id="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message" tabindex="-1">
+        <div class="confirm-kicker" id="confirm-kicker">二次确认</div>
+        <h2 id="confirm-title">确认操作</h2>
+        <p id="confirm-message">请确认是否继续。</p>
+        <div class="confirm-actions">
+          <button class="button button-secondary" id="confirm-cancel" type="button">取消</button>
+          <button class="button button-primary" id="confirm-ok" type="button">确认</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="./app.js?v=20260607-confirm-dialog"></script>
 
   </body>
 </html>

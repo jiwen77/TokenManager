@@ -79,6 +79,42 @@ function parseNonNegativeInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+function normalizeFrameAncestors(value, fallback = "'self'") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  const tokens = raw.split(/[\s,]+/).filter(Boolean).map((token) => {
+    const lowered = token.toLowerCase();
+    if (lowered === "none" || lowered === "'none'") {
+      return "'none'";
+    }
+    if (lowered === "self" || lowered === "'self'") {
+      return "'self'";
+    }
+    if (!/^https?:\/\/[A-Za-z0-9.*:-]+$/.test(token)) {
+      throw new Error("TOKENMANAGER_FRAME_ANCESTORS must contain only 'none', 'self', or http(s) origins");
+    }
+    if (token.includes("*") && !/^https?:\/\/\*\.[A-Za-z0-9.-]+(?::\d+)?$/.test(token)) {
+      throw new Error("TOKENMANAGER_FRAME_ANCESTORS wildcard entries must look like https://*.example.com");
+    }
+    if (!token.includes("*")) {
+      const parsed = new URL(token);
+      if (parsed.origin !== token.replace(/\/+$/, "")) {
+        throw new Error("TOKENMANAGER_FRAME_ANCESTORS origins must not include paths, query strings, or fragments");
+      }
+      return parsed.origin;
+    }
+    return token;
+  });
+
+  if (tokens.includes("'none'") && tokens.length > 1) {
+    throw new Error("TOKENMANAGER_FRAME_ANCESTORS cannot combine 'none' with other sources");
+  }
+  return Array.from(new Set(tokens)).join(" ");
+}
+
 function stripInlineComment(value) {
   let quote = "";
   for (let index = 0; index < value.length; index += 1) {
@@ -383,6 +419,7 @@ function createConfig(env = process.env) {
     loginWindowSeconds: parsePositiveInteger(env.TOKENMANAGER_LOGIN_WINDOW_SECONDS, DEFAULT_LOGIN_WINDOW_SECONDS),
     loginLockSeconds: parsePositiveInteger(env.TOKENMANAGER_LOGIN_LOCK_SECONDS, DEFAULT_LOGIN_LOCK_SECONDS),
     appBasePath: normalizePublicPath(env.TOKENMANAGER_BASE_PATH || DEFAULT_APP_BASE_PATH, DEFAULT_APP_BASE_PATH).replace(/\/+$/, "") || DEFAULT_APP_BASE_PATH,
+    frameAncestors: normalizeFrameAncestors(env.TOKENMANAGER_FRAME_ANCESTORS || env.TOKENMANAGER_CSP_FRAME_ANCESTORS),
     staticDir: path.resolve(env.TOKENMANAGER_STATIC_DIR || path.join(__dirname, "..", "docs")),
     envFile: path.resolve(defaultEnvFilePath(env)),
     storageBackend: String(env.TOKENMANAGER_STORAGE_BACKEND || "sqlite").trim().toLowerCase(),
@@ -720,6 +757,7 @@ const STATIC_CONTENT_TYPES = new Map([
 
 function buildContentSecurityPolicy(options = {}) {
   const nonce = options.nonce ? ` 'nonce-${options.nonce}'` : "";
+  const frameAncestors = options.frameAncestors || "'self'";
   return [
     "default-src 'self'",
     `script-src 'self'${nonce}`,
@@ -729,7 +767,7 @@ function buildContentSecurityPolicy(options = {}) {
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
-    "frame-ancestors 'none'",
+    `frame-ancestors ${frameAncestors}`,
   ].join("; ");
 }
 
@@ -797,7 +835,7 @@ function getSafeStaticFilePath(staticDir, requestPath) {
   return resolved;
 }
 
-function serveStaticFile(req, res, filePath) {
+function serveStaticFile(req, res, filePath, config = {}) {
   if (!["GET", "HEAD"].includes(req.method || "GET")) {
     return methodNotAllowed(res);
   }
@@ -818,7 +856,7 @@ function serveStaticFile(req, res, filePath) {
     "Content-Type": contentType,
     "Content-Length": stat.size,
     "Cache-Control": "no-store",
-  }));
+  }, { frameAncestors: config.frameAncestors }));
   if (req.method === "HEAD") {
     res.end();
     return;
@@ -895,9 +933,12 @@ function tokenManagerLoginPage(options = {}) {
 </html>`;
 }
 
-function loginPageResponse(res, status = 401) {
+function loginPageResponse(res, status = 401, config = {}) {
   const nonce = base64url(crypto.randomBytes(16));
-  htmlResponse(res, status, tokenManagerLoginPage({ nonce }), tokenManagerSecurityHeaders({}, { nonce }));
+  htmlResponse(res, status, tokenManagerLoginPage({ nonce }), tokenManagerSecurityHeaders({}, {
+    nonce,
+    frameAncestors: config.frameAncestors,
+  }));
 }
 
 function methodNotAllowed(res) {
@@ -1304,13 +1345,13 @@ async function handleApp(req, res, parsedUrl, context) {
       notFound(res);
       return;
     }
-    serveStaticFile(req, res, faviconPath);
+    serveStaticFile(req, res, faviconPath, config);
     return;
   }
 
   const session = sessions.fromRequest(req);
   if (!session) {
-    loginPageResponse(res, 401);
+    loginPageResponse(res, 401, config);
     return;
   }
 
@@ -1322,11 +1363,11 @@ async function handleApp(req, res, parsedUrl, context) {
 
   if (!fs.existsSync(staticPath)) {
     const fallbackPath = getSafeStaticFilePath(config.staticDir, "index.html");
-    serveStaticFile(req, res, fallbackPath);
+    serveStaticFile(req, res, fallbackPath, config);
     return;
   }
 
-  serveStaticFile(req, res, staticPath);
+  serveStaticFile(req, res, staticPath, config);
 }
 
 async function handleAuth(req, res, parsedUrl, context) {
@@ -1349,14 +1390,14 @@ async function handleAuth(req, res, parsedUrl, context) {
       });
       res.end();
     } else {
-      loginPageResponse(res, 401);
+      loginPageResponse(res, 401, config);
     }
     return;
   }
 
   if (pathname === "/token-manager-auth/login-page") {
     if (req.method !== "GET") return methodNotAllowed(res);
-    loginPageResponse(res, 200);
+    loginPageResponse(res, 200, config);
     return;
   }
 

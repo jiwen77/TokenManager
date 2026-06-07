@@ -1,10 +1,10 @@
 # TokenManager BFF deployment guide
 
-`server/tokenmanager-bff.js` is the secure Backend-for-Frontend (BFF) for TokenManager. It serves the static app, handles the TokenManager password gate, persists runtime settings, and proxies a small allowlist of sub2api admin endpoints.
+`server/tokenmanager-bff.js` is the optional Backend-for-Frontend (BFF) for TokenManager. It serves the static app, handles the TokenManager password gate, persists runtime settings, and proxies a narrow allowlist of sub2api admin endpoints.
 
-The goal is simple: the browser gets a TokenManager HttpOnly session cookie, while sub2api admin credentials stay on the server.
+The goal is to keep browser access simple while keeping sub2api admin credentials on the server.
 
-## Recommended production topology
+## Recommended topology
 
 ```text
 Internet
@@ -15,7 +15,23 @@ Internet
 
 Use the BFF for production deployments instead of browser-direct sub2api access. Browser-direct mode can still be useful for local testing, but it places admin tokens in the browser runtime.
 
-## Environment file
+## 1. Prepare the application directory
+
+Choose an installation directory for your environment. The examples below use `/srv/tokenmanager`; replace it with your own path.
+
+```bash
+sudo mkdir -p /srv/tokenmanager
+sudo chown -R tokenmanager:tokenmanager /srv/tokenmanager
+```
+
+Copy or clone the project into that directory, then create a writable data directory:
+
+```bash
+mkdir -p /srv/tokenmanager/data
+chmod 700 /srv/tokenmanager/data
+```
+
+## 2. Create the environment file
 
 Start from the checked-in template:
 
@@ -40,20 +56,22 @@ TOKENMANAGER_AUTH_ONLY=false
 TOKENMANAGER_HOST=127.0.0.1
 TOKENMANAGER_PORT=8787
 TOKENMANAGER_BASE_PATH=/token-manager
-TOKENMANAGER_STATIC_DIR=/opt/tokenmanager/docs
+TOKENMANAGER_STATIC_DIR=/srv/tokenmanager/docs
 
 TOKENMANAGER_PASSWORD_HASH=<generated-password-hash>
 TOKENMANAGER_SESSION_SECRET=<random-32-plus-byte-secret>
 TOKENMANAGER_ENCRYPTION_KEY=<different-random-32-plus-byte-secret>
 
 TOKENMANAGER_STORAGE_BACKEND=sqlite
-TOKENMANAGER_DATABASE_FILE=/opt/tokenmanager/data/tokenmanager.sqlite
+TOKENMANAGER_DATABASE_FILE=/srv/tokenmanager/data/tokenmanager.sqlite
 
 SUB2API_BASE_URL=http://127.0.0.1:8080/api/v1
 SUB2API_ADMIN_API_KEY=<server-side-sub2api-admin-api-key>
 ```
 
-If your sub2api deployment does not use an admin API key, use one of these server-only alternatives:
+Only one sub2api credential strategy is needed. Prefer `SUB2API_ADMIN_API_KEY` when available.
+
+### Alternative sub2api credential modes
 
 ```bash
 # Login mode. May not work if the sub2api admin login requires 2FA or Turnstile.
@@ -71,15 +89,13 @@ SUB2API_SIGNED_TOKEN_TTL_SECONDS=3600
 SUB2API_ADMIN_BEARER_TOKEN=<server-side-admin-bearer-token>
 ```
 
-Only one sub2api credential strategy is needed. Prefer `SUB2API_ADMIN_API_KEY` when available.
-
-## Runtime configuration storage
+## 3. Runtime configuration storage
 
 The default backend is SQLite:
 
 ```bash
 TOKENMANAGER_STORAGE_BACKEND=sqlite
-TOKENMANAGER_DATABASE_FILE=/opt/tokenmanager/data/tokenmanager.sqlite
+TOKENMANAGER_DATABASE_FILE=/srv/tokenmanager/data/tokenmanager.sqlite
 TOKENMANAGER_ENCRYPTION_KEY=<random-32-plus-byte-secret>
 ```
 
@@ -91,7 +107,7 @@ SQLite access uses Python's standard library `sqlite3` through a small helper pr
 TOKENMANAGER_PYTHON=/usr/bin/python3
 ```
 
-## Reverse proxy example
+## 4. Reverse proxy
 
 Example Caddy route:
 
@@ -102,7 +118,7 @@ handle @tokenmanager {
 }
 ```
 
-Do not use `handle_path` for this route; stripping `/token-manager` prevents the BFF from routing by its configured base path.
+Do not use `handle_path` for this route. Stripping `/token-manager` prevents the BFF from routing by its configured base path.
 
 The BFF serves:
 
@@ -112,7 +128,34 @@ The BFF serves:
 
 Legacy `/token-manager-auth/*` and `/token-manager-api/*` paths remain for compatibility, but new deployments should use the base-path routes above.
 
-## systemd example
+## 5. Iframe embedding
+
+By default the BFF sends:
+
+```http
+Content-Security-Policy: frame-ancestors 'self'
+```
+
+This allows pages on the same origin to embed TokenManager while unrelated sites are blocked.
+
+To embed TokenManager in a trusted cross-origin page, set exact parent-page origins:
+
+```bash
+TOKENMANAGER_FRAME_ANCESTORS=https://portal.example.com
+```
+
+Use origins, not paths. Multiple trusted origins can be separated by spaces or commas. Set `TOKENMANAGER_FRAME_ANCESTORS=none` to disable all iframe embedding.
+
+If the iframe is cross-site and users need to log in inside it, also set:
+
+```bash
+TOKENMANAGER_COOKIE_SAMESITE=None
+TOKENMANAGER_COOKIE_SECURE=true
+```
+
+Check the reverse proxy too: do not add `X-Frame-Options: DENY` or a conflicting `Content-Security-Policy` on the TokenManager route.
+
+## 6. systemd example
 
 ```ini
 [Unit]
@@ -122,9 +165,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/tokenmanager
-EnvironmentFile=/opt/tokenmanager/server/.env
-ExecStart=/usr/bin/node /opt/tokenmanager/server/tokenmanager-bff.js
+WorkingDirectory=/srv/tokenmanager
+EnvironmentFile=/srv/tokenmanager/server/.env
+ExecStart=/usr/bin/node /srv/tokenmanager/server/tokenmanager-bff.js
 Restart=on-failure
 RestartSec=3
 User=tokenmanager
@@ -133,7 +176,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/tokenmanager/data /opt/tokenmanager/server
+ReadWritePaths=/srv/tokenmanager/data /srv/tokenmanager/server
 
 [Install]
 WantedBy=multi-user.target
@@ -149,22 +192,40 @@ Fallback over SSH:
 
 ```bash
 printf '%s' 'replace-with-a-new-strong-password' \
-  | node server/tokenmanager-bff.js set-login-password --env /opt/tokenmanager/server/.env
+  | node server/tokenmanager-bff.js set-login-password --env /srv/tokenmanager/server/.env
 systemctl restart tokenmanager-bff
 ```
 
 ## Allowed sub2api proxy routes
 
-The proxy is intentionally narrow. It currently allows account list/update/delete/import, account privacy/schedulable operations, group list, and proxy list endpoints required by the UI. Do not widen the allowlist unless the UI needs the endpoint and the response is safe to expose after sanitization.
+The proxy is intentionally narrow. It currently allows the account list/update/delete/import routes, account privacy/schedulable operations, group list, and proxy list endpoints required by the UI.
 
-## Publishing checklist
+Do not widen the allowlist unless:
 
-Before pushing a fork or deployment branch:
+1. the UI needs the endpoint;
+2. the response is safe to expose after sanitization; and
+3. tests cover the new route and any secret-stripping behavior.
+
+## Deployment checklist
+
+Before starting the service publicly:
+
+- [ ] `server/.env` exists only on the server and has mode `600`.
+- [ ] `TOKENMANAGER_PASSWORD_HASH` is set and the plaintext password is not stored.
+- [ ] `TOKENMANAGER_SESSION_SECRET` and `TOKENMANAGER_ENCRYPTION_KEY` are long, random, and different.
+- [ ] sub2api admin credentials are server-only.
+- [ ] reverse proxy uses HTTPS for public traffic.
+- [ ] iframe policy is the narrowest value that meets your needs.
+- [ ] runtime data directory is writable by the service user only.
+- [ ] logs do not include request headers, cookies, or tokens.
+
+Before pushing a branch or fork, run a sensitive information review from the repository root:
 
 ```bash
 git status --short --ignored
-grep -RIn "Bearer \\|access_token\\|refresh_token\\|sessionToken\\|PASSWORD=\\|SECRET=\\|API_KEY=" . \
-  --exclude-dir=.git --exclude-dir=node_modules
+grep -RInE "Bearer |access_token|refresh_token|sessionToken|PASSWORD=|SECRET=|API_KEY=|https?://[^ ]+" . \
+  --exclude-dir=.git \
+  --exclude-dir=node_modules
 ```
 
-Make sure the results contain only examples, tests, or documentation placeholders. Never publish `.env`, SQLite runtime files, session exports, generated account JSON, logs, or screenshots containing tokens.
+Review every match and keep only placeholders, examples, or tests.

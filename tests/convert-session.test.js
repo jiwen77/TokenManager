@@ -165,6 +165,21 @@ function dispatchWithTarget(element, type, target) {
   element.listeners[type]({ target });
 }
 
+function confirmPendingDialog(elements, expected = {}) {
+  assert.equal(elements.get("#confirm-dialog").hidden, false, "expected themed confirm dialog to open");
+  if (expected.title) {
+    assert.match(elements.get("#confirm-title").textContent, expected.title);
+  }
+  if (expected.message) {
+    assert.match(elements.get("#confirm-message").textContent, expected.message);
+  }
+  if (expected.okText) {
+    assert.equal(elements.get("#confirm-ok").textContent, expected.okText);
+  }
+  dispatch(elements.get("#confirm-ok"), "click");
+  assert.equal(elements.get("#confirm-dialog").hidden, true, "expected themed confirm dialog to close");
+}
+
 async function flushAsync(turns = 5) {
   for (let index = 0; index < turns; index += 1) {
     await new Promise((resolve) => setImmediate(resolve));
@@ -822,6 +837,9 @@ async function testSub2apiUrlShorthandNormalizesToApiEndpoints() {
         origin: "https://tokenmanager.example.com",
         protocol: "https:",
         search: "",
+      },
+      confirm() {
+        throw new Error("native browser confirm should not be used");
       },
     },
     fetch: async (url, options = {}) => {
@@ -1644,7 +1662,11 @@ async function testServerAccountSearchSelectionAndBatchActions() {
   assert.equal(updateBody.proxy_id, 3);
   assert.equal(updateBody.concurrency, 6);
   assert.equal(updateBody.confirm_mixed_channel_risk, true);
+  assert.match(elements.get("#server-account-selection-summary").textContent, /未选择账号/);
+  assert.equal(elements.get("#toggle-visible-server-account-selection").textContent, "全选可见");
 
+  dispatch(elements.get("#toggle-visible-server-account-selection"), "click");
+  assert.match(elements.get("#server-account-selection-summary").textContent, /已选择 1 个账号/);
   dispatch(elements.get("#privacy-selected-server-accounts"), "click");
   await flushAsync();
 
@@ -1655,6 +1677,11 @@ async function testServerAccountSearchSelectionAndBatchActions() {
 
   dispatchWithTarget(elements.get("#server-account-body"), "click", {
     dataset: { serverAction: "stop-schedule", serverAccountId: "7" },
+  });
+  confirmPendingDialog(elements, {
+    title: /确认关闭调度/,
+    message: /执行“关闭调度”/,
+    okText: "确认关闭",
   });
   await flushAsync();
 
@@ -1669,6 +1696,11 @@ async function testServerAccountSearchSelectionAndBatchActions() {
 
   dispatchWithTarget(elements.get("#server-account-body"), "click", {
     dataset: { serverAction: "start-schedule", serverAccountId: "7" },
+  });
+  confirmPendingDialog(elements, {
+    title: /确认启动调度/,
+    message: /执行“启动调度”/,
+    okText: "确认启动",
   });
   await flushAsync();
 
@@ -1688,6 +1720,11 @@ async function testServerAccountSearchSelectionAndBatchActions() {
       return { dataset: { serverAction: "disable-account", serverAccountId: "7" }, disabled: false };
     },
   });
+  confirmPendingDialog(elements, {
+    title: /确认禁用账号/,
+    message: /执行“禁用账号”/,
+    okText: "确认禁用",
+  });
   await flushAsync();
 
   assert.ok(
@@ -1702,6 +1739,11 @@ async function testServerAccountSearchSelectionAndBatchActions() {
   dispatchWithTarget(elements.get("#server-account-body"), "click", {
     dataset: { serverAction: "enable-account", serverAccountId: "7" },
   });
+  confirmPendingDialog(elements, {
+    title: /确认启用账号/,
+    message: /执行“启用账号”/,
+    okText: "确认启用",
+  });
   await flushAsync();
 
   assert.ok(
@@ -1713,7 +1755,14 @@ async function testServerAccountSearchSelectionAndBatchActions() {
     "enable account should update sub2api account status",
   );
 
+  dispatch(elements.get("#toggle-visible-server-account-selection"), "click");
+  assert.match(elements.get("#server-account-selection-summary").textContent, /已选择 1 个账号/);
   dispatch(elements.get("#delete-selected-server-accounts"), "click");
+  confirmPendingDialog(elements, {
+    title: /确认删除账号/,
+    message: /不可恢复/,
+    okText: "确认删除",
+  });
   await flushAsync();
 
   assert.ok(
@@ -1730,6 +1779,11 @@ async function testServerAccountSearchSelectionAndBatchActions() {
       assert.equal(selector, "[data-server-action][data-server-account-id]");
       return { dataset: { serverAction: "delete-account", serverAccountId: "7" }, disabled: false };
     },
+  });
+  confirmPendingDialog(elements, {
+    title: /确认删除账号/,
+    message: /不可恢复/,
+    okText: "确认删除",
   });
   await flushAsync();
 

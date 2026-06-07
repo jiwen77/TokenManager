@@ -7,7 +7,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
-const { RuntimeConfigStore, createSub2ApiBrowserDefaults, createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, updateEnvFileText, verifyPasswordHash } = require("../server/tokenmanager-bff");
+const { RuntimeConfigStore, createConfig, createSub2ApiBrowserDefaults, createSub2ApiBrowserDefaultUrl, createTokenManagerServer, hashPassword, updateEnvFileText, verifyPasswordHash } = require("../server/tokenmanager-bff");
 const { normalizeServerAccountCache } = require("../server/lib/runtime-config-store");
 
 function listen(server) {
@@ -94,6 +94,23 @@ test("hashPassword creates verifiable scrypt hashes", async () => {
   assert.match(encoded, /^scrypt:v1:/);
   assert.equal(await verifyPasswordHash("secret-password", encoded), true);
   assert.equal(await verifyPasswordHash("wrong-password", encoded), false);
+});
+
+test("createConfig normalizes iframe frame-ancestor allowlist", () => {
+  const config = createConfig({
+    NODE_ENV: "production",
+    TOKENMANAGER_FRAME_ANCESTORS: "self, https://portal.example.com https://*.example.org",
+  });
+  assert.equal(config.frameAncestors, "'self' https://portal.example.com https://*.example.org");
+  assert.equal(createConfig({ TOKENMANAGER_FRAME_ANCESTORS: "" }).frameAncestors, "'self'");
+  assert.throws(
+    () => createConfig({ TOKENMANAGER_FRAME_ANCESTORS: "https://portal.example.com/path" }),
+    /origins must not include paths|must contain only/,
+  );
+  assert.throws(
+    () => createConfig({ TOKENMANAGER_FRAME_ANCESTORS: "none https://portal.example.com" }),
+    /cannot combine 'none'/,
+  );
 });
 
 test("updateEnvFileText replaces or appends login password hash", () => {
@@ -428,6 +445,7 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
     assert.equal(unauthenticatedPage.response.status, 401);
     assert.match(unauthenticatedPage.body, /<h1>TokenManager<\/h1>/);
     assert.match(unauthenticatedPage.body, /\/token-manager\/auth\/login/);
+    assert.match(unauthenticatedPage.response.headers.get("content-security-policy") || "", /frame-ancestors 'self'(?:;|$)/);
 
     const unauthenticatedIcon = await fetchText(`${bff.baseUrl}/token-manager/favicon.svg`);
     assert.equal(unauthenticatedIcon.response.status, 200);
@@ -448,11 +466,12 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
     assert.equal(app.response.status, 200);
     assert.doesNotMatch(app.response.headers.get("content-security-policy") || "", /unsafe-inline/);
     assert.match(app.response.headers.get("content-security-policy") || "", /script-src 'self'(?:;|$)/);
+    assert.match(app.response.headers.get("content-security-policy") || "", /frame-ancestors 'self'(?:;|$)/);
     assert.doesNotMatch(app.body, /style="/);
     assert.match(app.body, /id="save-sub2api-config"/);
     assert.match(app.body, /id="logout-button"/);
-    assert.match(app.body, /href="\.\/styles\.css\?v=20260607-delete-accounts"/);
-    assert.match(app.body, /src="\.\/app\.js\?v=20260607-delete-accounts"/);
+    assert.match(app.body, /href="\.\/styles\.css\?v=20260607-confirm-dialog"/);
+    assert.match(app.body, /src="\.\/app\.js\?v=20260607-confirm-dialog"/);
 
     const appScript = await fetchText(`${bff.baseUrl}/token-manager/app.js`, {
       headers: { Cookie: cookie },
@@ -495,6 +514,48 @@ test("BFF serves the TokenManager app and nested routes under one app prefix", a
     });
     assert.equal(deleted.response.status, 200);
     assert.equal(upstreamRequests.some((url) => url === "/api/v1/admin/accounts/7"), true);
+  } finally {
+    await bff.close();
+    await mock.close();
+  }
+});
+
+test("BFF can allow embedding from configured iframe ancestors", async () => {
+  const mock = await startMockSub2Api((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ data: { items: [], total: 0 } }));
+  });
+  const bff = await startBff({
+    sub2apiAdminApiKey: "test-api-key",
+    sub2apiAdminEmail: "",
+    sub2apiAdminPassword: "",
+    frameAncestors: "https://portal.example.com",
+  }, mock.baseUrl);
+
+  try {
+    const unauthenticatedPage = await fetchText(`${bff.baseUrl}/token-manager/`);
+    assert.equal(unauthenticatedPage.response.status, 401);
+    assert.match(
+      unauthenticatedPage.response.headers.get("content-security-policy") || "",
+      /frame-ancestors https:\/\/portal\.example\.com(?:;|$)/,
+    );
+
+    const login = await fetchJson(`${bff.baseUrl}/token-manager/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "tokenmanager-password" }),
+    });
+    const cookie = (login.response.headers.get("set-cookie") || "").split(";")[0];
+    assert.ok(cookie);
+
+    const app = await fetchText(`${bff.baseUrl}/token-manager/`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(app.response.status, 200);
+    assert.match(
+      app.response.headers.get("content-security-policy") || "",
+      /frame-ancestors https:\/\/portal\.example\.com(?:;|$)/,
+    );
   } finally {
     await bff.close();
     await mock.close();

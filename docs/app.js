@@ -61,6 +61,14 @@
           serverAccountSearch: document.querySelector("#server-account-search"),
           serverAccountSelectionSummary: document.querySelector("#server-account-selection-summary"),
           toggleVisibleServerAccountSelection: document.querySelector("#toggle-visible-server-account-selection"),
+          serverMoreActions: document.querySelector("#server-more-actions"),
+          confirmDialog: document.querySelector("#confirm-dialog"),
+          confirmCard: document.querySelector("#confirm-card"),
+          confirmKicker: document.querySelector("#confirm-kicker"),
+          confirmTitle: document.querySelector("#confirm-title"),
+          confirmMessage: document.querySelector("#confirm-message"),
+          confirmCancel: document.querySelector("#confirm-cancel"),
+          confirmOk: document.querySelector("#confirm-ok"),
           applySelectedServerAccountSettings: document.querySelector("#apply-selected-server-account-settings"),
           privacySelectedServerAccounts: document.querySelector("#privacy-selected-server-accounts"),
           startSelectedServerAccountSchedule: document.querySelector("#start-selected-server-account-schedule"),
@@ -1161,6 +1169,81 @@
           element.textContent = text;
           element.classList.toggle("is-ok", tone === "ok");
           element.classList.toggle("is-error", tone === "error");
+        }
+
+        let pendingConfirmDialog = null;
+
+        function focusSafely(element) {
+          if (element && typeof element.focus === "function") {
+            element.focus({ preventScroll: true });
+          }
+        }
+
+        function closeConfirmDialog(confirmed) {
+          const pending = pendingConfirmDialog;
+          pendingConfirmDialog = null;
+          elements.confirmDialog.hidden = true;
+          elements.confirmDialog.classList.toggle("is-danger", false);
+          elements.confirmOk.classList.remove("button-danger");
+          elements.confirmOk.classList.add("button-primary");
+          if (pending) {
+            focusSafely(pending.restoreFocus);
+            pending.resolve(Boolean(confirmed));
+          }
+        }
+
+        function openConfirmDialog({
+          title,
+          message,
+          confirmLabel = "确认",
+          kicker = "二次确认",
+          danger = false,
+        }) {
+          if (pendingConfirmDialog) {
+            closeConfirmDialog(false);
+          }
+
+          return new Promise((resolve) => {
+            pendingConfirmDialog = {
+              resolve,
+              restoreFocus: document.activeElement,
+            };
+            elements.confirmKicker.textContent = kicker;
+            elements.confirmTitle.textContent = title;
+            elements.confirmMessage.textContent = message;
+            elements.confirmOk.textContent = confirmLabel;
+            elements.confirmDialog.hidden = false;
+            elements.confirmDialog.classList.toggle("is-danger", danger);
+            elements.confirmOk.classList.toggle("button-primary", !danger);
+            elements.confirmOk.classList.toggle("button-danger", danger);
+            focusSafely(elements.confirmCancel);
+          });
+        }
+
+        function isConfirmableServerOperation(operation) {
+          return ["start-schedule", "stop-schedule", "enable-account", "disable-account", "delete-account"].includes(operation);
+        }
+
+        function getServerOperationConfirmOptions(operation, label, count) {
+          const isDanger = operation === "delete-account";
+          const title = isDanger ? "确认删除账号" : `确认${label}`;
+          const message = isDanger
+            ? `将删除 ${count} 个账号，此操作不可恢复。`
+            : `将对 ${count} 个账号执行“${label}”。操作成功后会自动刷新列表。`;
+          const confirmLabels = {
+            "start-schedule": "确认启动",
+            "stop-schedule": "确认关闭",
+            "enable-account": "确认启用",
+            "disable-account": "确认禁用",
+            "delete-account": "确认删除",
+          };
+          return {
+            title,
+            message,
+            confirmLabel: confirmLabels[operation] || "确认",
+            kicker: isDanger ? "危险操作" : "二次确认",
+            danger: isDanger,
+          };
         }
 
         function isSub2ApiFormat() {
@@ -2719,6 +2802,10 @@
           elements.toggleVisibleServerAccountSelection.textContent = allVisibleSelected ? "清空选择" : "全选可见";
           elements.toggleVisibleServerAccountSelection.dataset.selectionMode = allVisibleSelected ? "clear" : "select";
           elements.toggleVisibleServerAccountSelection.disabled = visibleIds.length === 0 && selectedCount === 0;
+          elements.serverMoreActions.setAttribute("aria-disabled", String(selectedCount === 0));
+          if (selectedCount === 0) {
+            elements.serverMoreActions.open = false;
+          }
           [
             elements.applySelectedServerAccountSettings,
             elements.enableSelectedServerAccounts,
@@ -3129,6 +3216,10 @@
         }
 
         function setServerAccountActionBusy(isBusy) {
+          elements.serverMoreActions.setAttribute("aria-disabled", String(isBusy || state.selectedServerAccountIds.length === 0));
+          if (isBusy) {
+            elements.serverMoreActions.open = false;
+          }
           [
             elements.refreshServerAccounts,
             elements.toggleVisibleServerAccountSelection,
@@ -3152,7 +3243,7 @@
           });
         }
 
-        async function runServerAccountOperation(accountIds, operation) {
+        async function runServerAccountOperation(accountIds, operation, options = {}) {
           const ids = (Array.isArray(accountIds) ? accountIds : [accountIds])
             .map((id) => String(id ?? "").trim())
             .filter(Boolean);
@@ -3171,11 +3262,9 @@
             "delete-account": "删除账号",
           };
           let label = operationLabels[operation] || "操作";
-          if (["start-schedule", "stop-schedule", "enable-account", "disable-account", "delete-account"].includes(operation) && typeof window.confirm === "function") {
-            const confirmText = operation === "delete-account"
-              ? `${label} ${ids.length} 个账号？此操作不可恢复。`
-              : `${label} ${ids.length} 个账号？`;
-            const ok = window.confirm(confirmText);
+          if (isConfirmableServerOperation(operation)) {
+            elements.serverMoreActions.open = false;
+            const ok = await openConfirmDialog(getServerOperationConfirmOptions(operation, label, ids.length));
             if (!ok) {
               return;
             }
@@ -3186,6 +3275,7 @@
           let failed = 0;
           let skipped = 0;
           const successfulIds = [];
+          const completedIds = [];
           setStatus(elements.serverAccountStatus, `正在${label} ${ids.length} 个账号...`, "ok");
 
           for (const id of ids) {
@@ -3197,6 +3287,7 @@
                 const privacyMeta = getPrivacyMeta(display.privacyMode, display);
                 if (!privacyMeta.applicable || privacyMeta.isOff) {
                   skipped += 1;
+                  completedIds.push(id);
                   continue;
                 }
                 await setSub2ApiAccountPrivacy(id);
@@ -3217,12 +3308,16 @@
               }
               success += 1;
               successfulIds.push(id);
+              completedIds.push(id);
             } catch {
               failed += 1;
             }
           }
 
-          if (operation === "delete-account" && successfulIds.length > 0) {
+          if (options.clearSelectionOnSuccess && completedIds.length > 0) {
+            const completed = new Set(completedIds);
+            state.selectedServerAccountIds = state.selectedServerAccountIds.filter((id) => !completed.has(id));
+          } else if (operation === "delete-account" && successfulIds.length > 0) {
             const deletedIds = new Set(successfulIds);
             state.selectedServerAccountIds = state.selectedServerAccountIds.filter((id) => !deletedIds.has(id));
           }
@@ -3593,6 +3688,43 @@
           elements.sub2apiUrl.dataset.userEdited = "true";
         });
 
+        elements.confirmCancel.addEventListener("click", () => {
+          closeConfirmDialog(false);
+        });
+        elements.confirmOk.addEventListener("click", () => {
+          closeConfirmDialog(true);
+        });
+        elements.confirmDialog.addEventListener("click", (event) => {
+          if (event.target === elements.confirmDialog) {
+            closeConfirmDialog(false);
+          }
+        });
+        elements.confirmDialog.addEventListener("keydown", (event) => {
+          if (!pendingConfirmDialog) {
+            return;
+          }
+          if (event.key === "Escape") {
+            event.preventDefault?.();
+            closeConfirmDialog(false);
+            return;
+          }
+          if (event.key !== "Tab") {
+            return;
+          }
+          const focusable = [elements.confirmCancel, elements.confirmOk].filter((element) => !element.disabled);
+          if (focusable.length === 0) {
+            return;
+          }
+          const activeIndex = focusable.indexOf(document.activeElement);
+          if (event.shiftKey && activeIndex <= 0) {
+            event.preventDefault?.();
+            focusSafely(focusable[focusable.length - 1]);
+          } else if (!event.shiftKey && activeIndex === focusable.length - 1) {
+            event.preventDefault?.();
+            focusSafely(focusable[0]);
+          }
+        });
+
         elements.fetchSub2apiMeta.addEventListener("click", fetchSub2ApiMeta);
         elements.refreshServerAccounts.addEventListener("click", refreshServerAccounts);
         elements.serverAccountSearch.addEventListener("input", () => {
@@ -3608,25 +3740,25 @@
           }
         });
         elements.applySelectedServerAccountSettings.addEventListener("click", () => {
-          runServerAccountOperation(state.selectedServerAccountIds, "apply-settings");
+          runServerAccountOperation(state.selectedServerAccountIds, "apply-settings", { clearSelectionOnSuccess: true });
         });
         elements.privacySelectedServerAccounts.addEventListener("click", () => {
-          runServerAccountOperation(state.selectedServerAccountIds, "set-privacy");
+          runServerAccountOperation(state.selectedServerAccountIds, "set-privacy", { clearSelectionOnSuccess: true });
         });
         elements.startSelectedServerAccountSchedule.addEventListener("click", () => {
-          runServerAccountOperation(state.selectedServerAccountIds, "start-schedule");
+          runServerAccountOperation(state.selectedServerAccountIds, "start-schedule", { clearSelectionOnSuccess: true });
         });
         elements.stopSelectedServerAccountSchedule.addEventListener("click", () => {
-          runServerAccountOperation(state.selectedServerAccountIds, "stop-schedule");
+          runServerAccountOperation(state.selectedServerAccountIds, "stop-schedule", { clearSelectionOnSuccess: true });
         });
         elements.enableSelectedServerAccounts.addEventListener("click", () => {
-          runServerAccountOperation(state.selectedServerAccountIds, "enable-account");
+          runServerAccountOperation(state.selectedServerAccountIds, "enable-account", { clearSelectionOnSuccess: true });
         });
         elements.disableSelectedServerAccounts.addEventListener("click", () => {
-          runServerAccountOperation(state.selectedServerAccountIds, "disable-account");
+          runServerAccountOperation(state.selectedServerAccountIds, "disable-account", { clearSelectionOnSuccess: true });
         });
         elements.deleteSelectedServerAccounts.addEventListener("click", () => {
-          runServerAccountOperation(state.selectedServerAccountIds, "delete-account");
+          runServerAccountOperation(state.selectedServerAccountIds, "delete-account", { clearSelectionOnSuccess: true });
         });
         elements.serverAccountBody.addEventListener("change", (event) => {
           const accountId = event.target?.dataset?.serverAccountId;

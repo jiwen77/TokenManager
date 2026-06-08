@@ -1200,6 +1200,203 @@ async function testImportToSub2ApiRandomlyAssignsSelectedProxies() {
   );
 }
 
+async function testSub2apiDocumentInputImportsNonSessionAccounts() {
+  const capturedRequests = [];
+  const { elements } = loadPageScript({
+    fetch: async (url, options = {}) => {
+      capturedRequests.push({ url: String(url), options });
+      if (String(url).includes("/admin/accounts?")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { items: [], total: 0 } }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ data: { success: 2, failed: 0, results: [] } }),
+      };
+    },
+  });
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+  elements.get("#sub2api-groups").selectedOptions = [{ value: "11" }, { value: "13" }];
+  dispatch(elements.get("#sub2api-groups"), "change");
+  elements.get("#sub2api-proxy").selectedOptions = [{ value: "101" }];
+  dispatch(elements.get("#sub2api-proxy"), "change");
+  elements.get("#sub2api-concurrency").value = "4";
+  dispatch(elements.get("#sub2api-concurrency"), "input");
+  elements.get("#sub2api-priority").value = "2";
+  dispatch(elements.get("#sub2api-priority"), "input");
+  elements.get("#sub2api-rate-multiplier").value = "1.5";
+  dispatch(elements.get("#sub2api-rate-multiplier"), "input");
+  elements.get("#sub2api-expires-at").value = "2026-06-30T12:34:56";
+  dispatch(elements.get("#sub2api-expires-at"), "input");
+  elements.get("#sub2api-websocket-mode").value = "passthrough";
+  dispatch(elements.get("#sub2api-websocket-mode"), "change");
+  elements.get("#sub2api-auto-passthrough").checked = true;
+  dispatch(elements.get("#sub2api-auto-passthrough"), "change");
+  elements.get("#session-input").value = JSON.stringify({
+    exported_at: "2026-06-08T00:00:00.000Z",
+    proxies: [],
+    accounts: [
+      {
+        name: "API key account",
+        platform: "openai",
+        type: "apikey",
+        credentials: { api_key: "sk-test-key" },
+        extra: {
+          openai_passthrough: false,
+          openai_oauth_responses_websockets_v2_enabled: false,
+          openai_oauth_responses_websockets_v2_mode: "off",
+        },
+        concurrency: 3,
+        priority: 8,
+        rate_multiplier: 1.25,
+        proxy_id: 303,
+        group_ids: [99],
+        expires_at: 1790000000,
+      },
+      {
+        name: "OAuth account without email",
+        platform: "openai",
+        type: "oauth",
+        credentials: { access_token: "oauth-access-token" },
+        concurrency: 5,
+        priority: 6,
+      },
+    ],
+  });
+  dispatch(elements.get("#session-input"), "input");
+
+  assert.equal(elements.get("#stat-count").textContent, "2");
+  assert.match(elements.get("#input-status").textContent, /解析完成：2 个账号/);
+
+  dispatch(elements.get("#import-sub2api"), "click");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const post = capturedRequests.find((request) => request.options?.method === "POST");
+  assert.ok(post, "expected import POST");
+  const body = JSON.parse(post.options.body);
+  assert.equal(body.accounts.length, 2);
+  assert.equal(body.accounts[0].type, "apikey");
+  assert.equal(body.accounts[0].credentials.api_key, "sk-test-key");
+  assert.equal(body.accounts[0].concurrency, 4);
+  assert.equal(body.accounts[0].priority, 2);
+  assert.equal(body.accounts[0].rate_multiplier, 1.5);
+  assert.equal(body.accounts[0].proxy_id, 101);
+  assert.deepEqual(body.accounts[0].group_ids, [11, 13]);
+  assert.equal(body.accounts[0].expires_at, Math.floor(new Date("2026-06-30T12:34:56").getTime() / 1000));
+  assert.equal(body.accounts[0].extra.openai_oauth_responses_websockets_v2_enabled, true);
+  assert.equal(body.accounts[0].extra.openai_oauth_responses_websockets_v2_mode, "passthrough");
+  assert.equal(body.accounts[0].extra.openai_passthrough, true);
+  assert.equal(body.accounts[1].name, "OAuth account without email");
+  assert.equal(body.accounts[1].credentials.access_token, "oauth-access-token");
+  assert.equal(body.accounts[1].concurrency, 4);
+  assert.equal(body.accounts[1].priority, 2);
+}
+
+async function testImportToSub2ApiKeepsDistinctEmailsWithSharedChatgptAccountId() {
+  const capturedRequests = [];
+  const { elements } = loadPageScript({
+    fetch: async (url, options = {}) => {
+      capturedRequests.push({ url: String(url), options });
+      const text = String(url);
+
+      if (text.includes("/admin/accounts?page=1&page_size=200")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            data: {
+              items: [{
+                id: 42,
+                name: "Existing First",
+                platform: "openai",
+                type: "oauth",
+                credentials: {
+                  email: "first@example.com",
+                  chatgpt_account_id: "shared-chatgpt-account",
+                },
+                extra: {},
+              }],
+              total: 1,
+            },
+          }),
+        };
+      }
+
+      if (text.includes("/admin/accounts?page=1&page_size=50")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { items: [], total: 1 } }),
+        };
+      }
+
+      if (text.endsWith("/admin/accounts/42/apply-oauth-credentials") && options.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { id: 42 } }),
+        };
+      }
+
+      if (text.endsWith("/admin/accounts/42") && options.method === "PUT") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { id: 42 } }),
+        };
+      }
+
+      if (text.endsWith("/admin/accounts/batch") && options.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { success: 1, failed: 0, results: [] } }),
+        };
+      }
+
+      throw new Error(`unexpected fetch ${text}`);
+    },
+  });
+
+  const accessToken = jwtWithPayload({
+    exp: 1780473960,
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "shared-chatgpt-account",
+    },
+  });
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+  elements.get("#session-input").value = JSON.stringify([
+    { user: { email: "first@example.com" }, accessToken },
+    { user: { email: "second@example.com" }, accessToken },
+  ]);
+  dispatch(elements.get("#session-input"), "input");
+  dispatch(elements.get("#import-sub2api"), "click");
+
+  await flushAsync();
+
+  const applyRequest = capturedRequests.find((request) => String(request.url).endsWith("/admin/accounts/42/apply-oauth-credentials"));
+  assert.ok(applyRequest, "matching email should update the existing account");
+  const applyBody = JSON.parse(applyRequest.options.body);
+  assert.equal(applyBody.credentials.email, "first@example.com");
+
+  const createRequest = capturedRequests.find((request) => String(request.url).endsWith("/admin/accounts/batch"));
+  assert.ok(createRequest, "different email with shared chatgpt_account_id should create a separate account");
+  const createBody = JSON.parse(createRequest.options.body);
+  assert.equal(createBody.accounts.length, 1);
+  assert.equal(createBody.accounts[0].credentials.email, "second@example.com");
+  assert.equal(createBody.accounts[0].credentials.chatgpt_account_id, "shared-chatgpt-account");
+  assert.match(elements.get("#output-status").textContent, /创建 1，更新 1，失败 0/);
+  assert.doesNotMatch(elements.get("#output-status").textContent, /输入内重复/);
+}
+
 async function testImportToSub2ApiUpdatesDuplicateAndSetsPrivacy() {
   const capturedRequests = [];
   const { elements } = loadPageScript({
@@ -1885,6 +2082,138 @@ async function testFetchSub2ApiMetaUsesSub2apiAllEndpoints() {
   assert.match(elements.get("#sub2api-config-status").textContent, /列表已缓存/);
 }
 
+async function testFetchSub2ApiMetaPreservesMultipleSelectedProxies() {
+  const capturedPosts = [];
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://tokenmanager.example.com",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url, options = {}) => {
+      if (url === "/token-manager/auth/config" && options.method === "POST") {
+        capturedPosts.push(JSON.parse(options.body));
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ ok: true }),
+        };
+      }
+      if (url === "/token-manager/auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sub2api_api_base_path: "/api/v1",
+            proxy_ids: [101, 202],
+            proxy_options: [{ id: 101, name: "Proxy A" }, { id: 202, name: "Proxy B" }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          data: String(url).includes("/admin/groups/all")
+            ? []
+            : [{ id: 101, name: "Proxy A" }, { id: 202, name: "Proxy B" }, { id: 303, name: "Proxy C" }],
+        }),
+      };
+    },
+  });
+
+  await flushAsync();
+  assert.match(elements.get("#sub2api-proxy-summary").innerHTML, /已选 2 个/);
+  assert.match(elements.get("#sub2api-proxy-list").innerHTML, /data-proxy-id="101"[\s\S]*checked/);
+  assert.match(elements.get("#sub2api-proxy-list").innerHTML, /data-proxy-id="202"[\s\S]*checked/);
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+  dispatch(elements.get("#fetch-sub2api-meta"), "click");
+  await flushAsync();
+
+  assert.match(elements.get("#sub2api-proxy-list").innerHTML, /data-proxy-id="101"[\s\S]*checked/);
+  assert.match(elements.get("#sub2api-proxy-list").innerHTML, /data-proxy-id="202"[\s\S]*checked/);
+  assert.match(elements.get("#sub2api-proxy-summary").innerHTML, /已选 2 个/);
+}
+
+async function testFetchSub2ApiMetaPrunesDeletedSelectedBindings() {
+  const capturedPosts = [];
+  const { elements } = loadPageScript({
+    window: {
+      location: {
+        origin: "https://tokenmanager.example.com",
+        protocol: "https:",
+        search: "",
+      },
+    },
+    fetch: async (url, options = {}) => {
+      if (url === "/token-manager/auth/config" && options.method === "POST") {
+        capturedPosts.push(JSON.parse(options.body));
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ ok: true }),
+        };
+      }
+      if (url === "/token-manager/auth/config") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sub2api_api_base_path: "/api/v1",
+            group_ids: [11, 99],
+            group_options: [{ id: 11, name: "Group A" }, { id: 99, name: "Deleted Group" }],
+            proxy_ids: [101, 202],
+            proxy_options: [{ id: 101, name: "Proxy A" }, { id: 202, name: "Deleted Proxy" }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          data: String(url).includes("/admin/groups/all")
+            ? [{ id: 11, name: "Group A" }, { id: 13, name: "New Group" }]
+            : [{ id: 101, name: "Proxy A" }, { id: 303, name: "New Proxy" }],
+        }),
+      };
+    },
+  });
+
+  await flushAsync();
+  assert.match(elements.get("#sub2api-group-summary").innerHTML, /已选 2 个/);
+  assert.match(elements.get("#sub2api-proxy-summary").innerHTML, /已选 2 个/);
+
+  elements.get("#sub2api-url").value = "https://sub2api.example.com/api/v1/admin/accounts/data";
+  elements.get("#sub2api-token").value = "test-token";
+  dispatch(elements.get("#fetch-sub2api-meta"), "click");
+  await flushAsync();
+
+  assert.match(elements.get("#sub2api-group-summary").innerHTML, /已选 1 个/);
+  assert.match(elements.get("#sub2api-proxy-summary").innerHTML, /已选 1 个/);
+  assert.match(elements.get("#sub2api-group-list").innerHTML, /data-group-id="11"[\s\S]*checked/);
+  assert.doesNotMatch(elements.get("#sub2api-group-list").innerHTML, /data-group-id="99"[\s\S]*checked/);
+  assert.match(elements.get("#sub2api-proxy-list").innerHTML, /data-proxy-id="101"[\s\S]*checked/);
+  assert.doesNotMatch(elements.get("#sub2api-proxy-list").innerHTML, /data-proxy-id="202"[\s\S]*checked/);
+
+  const cachePost = capturedPosts.at(-1);
+  assert.deepEqual(cachePost.group_ids, [11]);
+  assert.deepEqual(cachePost.proxy_ids, [101]);
+  assert.equal(cachePost.proxy_id, 101);
+
+  elements.get("#session-input").value = JSON.stringify({
+    user: { email: "pruned@example.com" },
+    accessToken: jwtWithPayload({ exp: 1780473960 }),
+  });
+  dispatch(elements.get("#session-input"), "input");
+  const output = JSON.parse(elements.get("#output").value);
+  assert.deepEqual(output.accounts[0].group_ids, [11]);
+  assert.equal(output.accounts[0].proxy_id, 101);
+}
+
 async function main() {
   testReferencedDomIdsExist();
   testSub2apiAccountUsesAccessTokenExpiry();
@@ -1911,12 +2240,16 @@ async function main() {
   await testSaveSub2apiConfigPostsServerSettings();
   await testImportToSub2ApiPostsCurrentSub2apiPayload();
   await testImportToSub2ApiRandomlyAssignsSelectedProxies();
+  await testSub2apiDocumentInputImportsNonSessionAccounts();
+  await testImportToSub2ApiKeepsDistinctEmailsWithSharedChatgptAccountId();
   await testImportToSub2ApiUpdatesDuplicateAndSetsPrivacy();
   await testRefreshServerAccountsFetchesPersistedAccounts();
   await testServerAccountRenderingEscapesUntrustedFields();
   await testServerAccountSearchSelectionAndBatchActions();
   await testUrlTokenDoesNotHydrateBearerOrFetchAccounts();
   await testFetchSub2ApiMetaUsesSub2apiAllEndpoints();
+  await testFetchSub2ApiMetaPreservesMultipleSelectedProxies();
+  await testFetchSub2ApiMetaPrunesDeletedSelectedBindings();
   console.log("convert-session tests passed");
 }
 

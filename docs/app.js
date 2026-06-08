@@ -442,6 +442,36 @@
           return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
         }
 
+        function getInputAccessToken(item) {
+          return firstNonEmpty(
+            item?.accessToken,
+            item?.access_token,
+            item?.tokens?.accessToken,
+            item?.tokens?.access_token,
+            item?.token?.accessToken,
+            item?.token?.access_token,
+            item?.credentials?.accessToken,
+            item?.credentials?.access_token,
+          );
+        }
+
+        function hasUsableCredentialValue(credentials) {
+          return isPlainObject(credentials)
+            && Object.values(credentials).some((value) => value !== undefined && value !== null && String(value).trim() !== "");
+        }
+
+        function isSub2ApiAccountObject(item) {
+          if (!isPlainObject(item) || !hasUsableCredentialValue(item.credentials)) {
+            return false;
+          }
+
+          return Boolean(firstNonEmpty(item.platform, item.type, item.proxy_key)
+            || item.proxy_id !== undefined
+            || item.group_ids !== undefined
+            || item.auto_pause_on_expired !== undefined
+            || item.rate_multiplier !== undefined);
+        }
+
         function collectSessionLikeObjects(value, sourceName = "pasted-json") {
           const found = [];
           const visited = new WeakSet();
@@ -457,16 +487,12 @@
               }
               visited.add(item);
 
-              const token = firstNonEmpty(
-                item.accessToken,
-                item.access_token,
-                item.tokens?.accessToken,
-                item.tokens?.access_token,
-                item.token?.accessToken,
-                item.token?.access_token,
-                item.credentials?.accessToken,
-                item.credentials?.access_token,
-              );
+              if (isSub2ApiAccountObject(item)) {
+                found.push({ value: item, sourceName, path, inputKind: "sub2api_account" });
+                return;
+              }
+
+              const token = getInputAccessToken(item);
               const hasIdentity = isPlainObject(item.user) || firstNonEmpty(
                 item.email,
                 item.name,
@@ -612,16 +638,7 @@
             throw new Error("session 不是 JSON 对象");
           }
 
-          const accessToken = firstNonEmpty(
-            record.accessToken,
-            record.access_token,
-            record.tokens?.accessToken,
-            record.tokens?.access_token,
-            record.token?.accessToken,
-            record.token?.access_token,
-            record.credentials?.accessToken,
-            record.credentials?.access_token,
-          );
+          const accessToken = getInputAccessToken(record);
           if (!accessToken) {
             throw new Error("缺少 accessToken");
           }
@@ -900,6 +917,98 @@
           };
         }
 
+        function normalizeOptionalIntegerValue(value) {
+          if (value === undefined || value === null || value === "") {
+            return undefined;
+          }
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? Math.floor(parsed) : undefined;
+        }
+
+        function normalizeSub2ApiAccountForImport(record, options = {}) {
+          const credentials = isPlainObject(record.credentials) ? { ...record.credentials } : {};
+          if (!hasUsableCredentialValue(credentials)) {
+            throw new Error("sub2api 账号缺少 credentials");
+          }
+
+          const extra = isPlainObject(record.extra) ? { ...record.extra } : {};
+          const expiresAt = state.expiresAtOverride
+            ?? normalizeOptionalIntegerValue(record.expires_at ?? record.expiresAt);
+          const type = firstNonEmpty(record.type, credentials.api_key ? "apikey" : "oauth");
+          const name = firstNonEmpty(
+            record.name,
+            record.email,
+            credentials.email,
+            extra?.email,
+            options.sourceName,
+            "sub2api Account",
+          );
+
+          return stripUnavailable({
+            name,
+            notes: record.notes,
+            platform: firstNonEmpty(record.platform, "openai"),
+            type,
+            credentials,
+            extra: {
+              ...extra,
+              openai_oauth_responses_websockets_v2_enabled: state.websocketMode !== "off",
+              openai_oauth_responses_websockets_v2_mode: state.websocketMode,
+              openai_passthrough: state.autoPassthrough,
+            },
+            proxy_id: normalizeOptionalIntegerValue(record.proxy_id ?? record.proxyId),
+            concurrency: state.concurrency,
+            priority: state.priority,
+            rate_multiplier: state.rateMultiplier,
+            load_factor: normalizeOptionalIntegerValue(record.load_factor ?? record.loadFactor),
+            group_ids: state.selectedGroups.length ? state.selectedGroups : undefined,
+            expires_at: expiresAt,
+            auto_pause_on_expired: true,
+            confirm_mixed_channel_risk: true,
+          }) || {};
+        }
+
+        function convertSub2apiAccount(record, options = {}) {
+          const sub2apiAccount = normalizeSub2ApiAccountForImport(record, options);
+          const credentials = isPlainObject(sub2apiAccount.credentials) ? sub2apiAccount.credentials : {};
+          const extra = isPlainObject(sub2apiAccount.extra) ? sub2apiAccount.extra : {};
+          const sourceName = firstNonEmpty(options.sourceName, "pasted-json");
+          const email = firstNonEmpty(record.email, credentials.email, extra.email);
+          const name = firstNonEmpty(sub2apiAccount.name, email, sourceName, "sub2api Account");
+          const expiresAt = sub2apiAccount.expires_at
+            ? timestampFromUnixSeconds(sub2apiAccount.expires_at)
+            : normalizeTimestamp(record.expires_at ?? record.expiresAt);
+          const passthrough = stripUnavailable({
+            name,
+            platform: sub2apiAccount.platform,
+            type: sub2apiAccount.type,
+            credentials: sub2apiAccount.credentials,
+            extra: sub2apiAccount.extra,
+          });
+
+          return {
+            sourceName,
+            sourcePath: options.sourcePath,
+            email,
+            name,
+            expiresAt,
+            accessTokenExpiresAt: expiresAt,
+            cpa: passthrough,
+            cockpit: passthrough,
+            nineRouter: passthrough,
+            codexAuthJson: passthrough,
+            axonHub: passthrough,
+            codexManager: passthrough,
+            sub2apiAccount,
+          };
+        }
+
+        function convertInputSource(item, options = {}) {
+          return item.inputKind === "sub2api_account"
+            ? convertSub2apiAccount(item.value, options)
+            : convertSession(item.value, options);
+        }
+
         function getRandomSelectedProxyId() {
           if (!state.selectedProxies.length) {
             return undefined;
@@ -992,11 +1101,16 @@
         }
 
         function isCompatibleExistingSub2ApiAccount(existing, imported) {
+          const existingIdentity = getAccountIdentity(existing);
+          const importedIdentity = getAccountIdentity(imported);
           const existingType = normalizeIdentityText(existing?.type);
           const existingPlatform = normalizeIdentityText(existing?.platform);
           const importedType = normalizeIdentityText(imported?.type);
           const importedPlatform = normalizeIdentityText(imported?.platform);
 
+          if (existingIdentity.email && importedIdentity.email && existingIdentity.email !== importedIdentity.email) {
+            return false;
+          }
           if (existingType && importedType && existingType !== importedType) {
             return false;
           }
@@ -1035,8 +1149,8 @@
         function findExistingAccountForImport(account, index) {
           const identity = getAccountIdentity(account);
           const candidates = [
-            identity.chatgptAccountId ? index.byChatgptAccountId.get(identity.chatgptAccountId) : undefined,
             identity.email ? index.byEmail.get(identity.email) : undefined,
+            identity.chatgptAccountId ? index.byChatgptAccountId.get(identity.chatgptAccountId) : undefined,
             !identity.chatgptAccountId && !identity.email && identity.name ? index.byName.get(identity.name) : undefined,
           ].filter(Boolean);
 
@@ -1045,11 +1159,11 @@
 
         function getImportIdentityKey(account) {
           const identity = getAccountIdentity(account);
-          if (identity.chatgptAccountId) {
-            return `chatgpt:${identity.chatgptAccountId}`;
-          }
           if (identity.email) {
             return `email:${identity.email}`;
+          }
+          if (identity.chatgptAccountId) {
+            return `chatgpt:${identity.chatgptAccountId}`;
           }
           return "";
         }
@@ -1137,7 +1251,7 @@
 
           sources.forEach((item, index) => {
             try {
-              converted.push(convertSession(item.value, {
+              converted.push(convertInputSource(item, {
                 now,
                 sourceName: item.sourceName,
                 sourcePath: item.path || `$[${index}]`,
@@ -1718,7 +1832,7 @@
           return key.replace(/\s+/g, " ");
         }
 
-        function reconcileSelectionsToKnownIds(values, knownItems, labelPrefix = "") {
+        function reconcileSelectionsToKnownIds(values, knownItems, labelPrefix = "", options = {}) {
           const knownByValue = new Map();
           const knownByLabel = new Map();
           knownItems.forEach((item) => {
@@ -1726,6 +1840,7 @@
             knownByValue.set(String(normalizedValue), normalizedValue);
             knownByLabel.set(normalizeSelectionLookupKey(item.label, labelPrefix), normalizedValue);
           });
+          const dropUnknown = options.dropUnknown === true && knownItems.length > 0;
 
           const seen = new Set();
           return normalizeSelectionList(values)
@@ -1733,8 +1848,9 @@
               const valueKey = String(value);
               return knownByValue.has(valueKey)
                 ? knownByValue.get(valueKey)
-                : knownByLabel.get(normalizeSelectionLookupKey(value, labelPrefix)) ?? value;
+                : knownByLabel.get(normalizeSelectionLookupKey(value, labelPrefix)) ?? (dropUnknown ? undefined : value);
             })
+            .filter((value) => value !== undefined && value !== null && value !== "")
             .filter((value) => {
               const key = String(value);
               if (seen.has(key)) {
@@ -1948,8 +2064,8 @@
           } else if (payload.sub2api_has_bearer_token || payload.sub2api_server_auth_configured) {
             elements.sub2apiToken.placeholder = "服务器已保存认证；留空保存不会覆盖";
           }
-          state.selectedGroups = reconcileSelectionsToKnownIds(state.selectedGroups, getKnownGroupItems(), "分组");
-          state.selectedProxies = reconcileSelectionsToKnownIds(state.selectedProxies, getKnownProxyItems(), "代理");
+          state.selectedGroups = reconcileSelectionsToKnownIds(state.selectedGroups, getKnownGroupItems(), "分组", { dropUnknown: true });
+          state.selectedProxies = reconcileSelectionsToKnownIds(state.selectedProxies, getKnownProxyItems(), "代理", { dropUnknown: true });
           applySavedSub2ApiSelectionsToControls();
         }
 
@@ -2073,6 +2189,9 @@
             body: JSON.stringify({
               group_options: toRuntimeMetaOptions(state.availableGroups),
               proxy_options: toRuntimeMetaOptions(state.availableProxies),
+              group_ids: state.selectedGroups,
+              proxy_ids: state.selectedProxies,
+              proxy_id: state.selectedProxies.length ? state.selectedProxies[0] : null,
             }),
           });
           const payload = await readJsonResponse(response);
@@ -3365,6 +3484,8 @@
               setNativeProxyOptions([], "未获取到可用代理数据");
             }
 
+            state.selectedGroups = reconcileSelectionsToKnownIds(state.selectedGroups, getKnownGroupItems(), "分组", { dropUnknown: true });
+            state.selectedProxies = reconcileSelectionsToKnownIds(state.selectedProxies, getKnownProxyItems(), "代理", { dropUnknown: true });
             applySavedSub2ApiSelectionsToControls();
             let cacheSaved = false;
             try {
@@ -3382,9 +3503,6 @@
           } finally {
             elements.fetchSub2apiMeta.disabled = false;
             elements.fetchSub2apiMeta.textContent = originalText;
-            // 触发表单数据更新状态
-            elements.groups.dispatchEvent(new Event('change'));
-            elements.proxy.dispatchEvent(new Event('change'));
           }
         }
 
@@ -3537,7 +3655,7 @@
           const convertSkipped = [...skipped];
           documents.forEach((item) => {
             try {
-              converted.push(convertSession(item.value, {
+              converted.push(convertInputSource(item, {
                 now,
                 sourceName: item.sourceName,
                 sourcePath: item.path,
